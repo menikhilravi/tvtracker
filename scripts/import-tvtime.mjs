@@ -155,26 +155,44 @@ const mapPath = path.join(exportDir, 'tmdb-id-map.json')
 const idMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {}
 const authHeaders = { apikey: ANON_KEY, authorization: `Bearer ${ANON_KEY}` }
 
-async function resolveShow(tvdbId) {
-  // A cached entry is reusable only if it's a "not found" (null) or already has
-  // the current shape (with `seasons`). Older-format entries are re-resolved.
+const getJson = (url) => fetch(url, { headers: authHeaders }).then((r) => r.json())
+
+// Find the TMDB id for a show: first by TheTVDB id, then (if that misses) by
+// name search — many regional/newer shows have no tvdb→tmdb cross-reference.
+async function findTmdbId(tvdbId, name) {
+  const find = await getJson(`${PROXY_URL}/find/${tvdbId}?external_source=tvdb_id`)
+  if (find.tv_results?.[0]) return find.tv_results[0].id
+
+  if (!name) return null
+  const yearHint = name.match(/\((\d{4})\)/)?.[1]
+  const query = name.replace(/\s*\(\d{4}\)\s*/, '').trim()
+  const search = await getJson(
+    `${PROXY_URL}/search/multi?query=${encodeURIComponent(query)}&include_adult=false`,
+  )
+  const tv = (search.results ?? []).filter((r) => r.media_type === 'tv')
+  if (tv.length === 0) return null
+  // Prefer a first-air-year match when the TV Time name carried a year.
+  const byYear = yearHint && tv.find((r) => (r.first_air_date || '').startsWith(yearHint))
+  return (byYear || tv[0]).id
+}
+
+async function resolveShow(tvdbId, name) {
+  // Reuse only successful, current-shape cache entries. Old-shape entries and
+  // previous "not found" nulls are re-resolved (so the name fallback applies).
   const cached = idMap[tvdbId]
-  if (cached !== undefined && (cached === null || cached.seasons !== undefined)) return cached
+  if (cached && cached.seasons !== undefined) return cached
   try {
-    const find = await (
-      await fetch(`${PROXY_URL}/find/${tvdbId}?external_source=tvdb_id`, { headers: authHeaders })
-    ).json()
-    const hit = find.tv_results?.[0]
-    if (!hit) {
+    const tmdbId = await findTmdbId(tvdbId, name)
+    if (!tmdbId) {
       idMap[tvdbId] = null
       return null
     }
-    const detail = await (await fetch(`${PROXY_URL}/tv/${hit.id}`, { headers: authHeaders })).json()
+    const detail = await getJson(`${PROXY_URL}/tv/${tmdbId}`)
     idMap[tvdbId] = {
-      id: hit.id,
-      name: detail.name ?? hit.name,
-      poster_path: detail.poster_path ?? hit.poster_path ?? null,
-      year: (detail.first_air_date || hit.first_air_date || '').slice(0, 4) || null,
+      id: tmdbId,
+      name: detail.name ?? name,
+      poster_path: detail.poster_path ?? null,
+      year: (detail.first_air_date || '').slice(0, 4) || null,
       numberOfEpisodes: detail.number_of_episodes ?? 0,
       status: detail.status ?? '',
       // [[seasonNumber, episodeCount], …] excluding specials (season 0)
@@ -217,7 +235,9 @@ function firstNEpisodes(seasons, n) {
 function statusFor(seen, meta, followed) {
   if (seen <= 0) return followed ? 'watchlist' : null
   const ended = meta.status === 'Ended' || meta.status === 'Canceled'
-  if (ended && meta.numberOfEpisodes && seen >= meta.numberOfEpisodes - 1) return 'completed'
+  // TV Time's episode counts run slightly below TMDB's (specials, recaps, count
+  // quirks), so treat an ended show that's ≥90% watched as finished.
+  if (ended && meta.numberOfEpisodes && seen >= meta.numberOfEpisodes * 0.9) return 'completed'
   return 'watching'
 }
 
@@ -259,7 +279,7 @@ if (RESET) {
 // --- resolve TMDB metadata --------------------------------------------------
 
 console.log('🔗 Resolving shows on TMDB (id + episode structure)…')
-await pool([...shows.keys()], 8, resolveShow)
+await pool([...shows.values()], 8, (s) => resolveShow(s.tvdbId, s.name))
 fs.writeFileSync(mapPath, JSON.stringify(idMap, null, 2))
 
 // --- build rows -------------------------------------------------------------
@@ -316,21 +336,41 @@ console.log(`   ${mapped} shows mapped, ${skippedUnstarted} unstarted skipped\n`
 
 // --- upsert -----------------------------------------------------------------
 
+// Multiple TheTVDB shows can resolve to the same TMDB id (esp. via the name
+// fallback), which would make a batch hit the same conflict key twice. Collapse
+// duplicates first (last one wins).
+function dedupe(rows, keyFn) {
+  const m = new Map()
+  for (const r of rows) m.set(keyFn(r), r)
+  return [...m.values()]
+}
+const byTitle = (r) => `${r.tmdb_id}:${r.media_type}`
+const byEpisode = (r) => `${r.tmdb_show_id}:${r.season_number}:${r.episode_number}`
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 async function upsertAll(table, rows, onConflict) {
   for (let i = 0; i < rows.length; i += 500) {
     const chunk = rows.slice(i, i + 500)
-    const { error } = await supabase.from(table).upsert(chunk, { onConflict })
+    // Retry transient network failures with backoff (upsert is idempotent).
+    let error
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      ;({ error } = await supabase.from(table).upsert(chunk, { onConflict }))
+      if (!error) break
+      process.stdout.write(`\r   ${table}: retry ${attempt} (${error.message})   `)
+      await sleep(800 * attempt)
+    }
     if (error) throw new Error(`${table}: ${error.message}`)
-    process.stdout.write(`\r   ${table}: ${Math.min(i + 500, rows.length)}/${rows.length}`)
+    process.stdout.write(`\r   ${table}: ${Math.min(i + 500, rows.length)}/${rows.length}          `)
   }
-  process.stdout.write(`\r   ${table}: ${rows.length}/${rows.length} ✓\n`)
+  process.stdout.write(`\r   ${table}: ${rows.length}/${rows.length} ✓          \n`)
 }
 
 console.log('⬆️  Writing to your tracker…')
-await upsertAll('titles', titleRows, 'tmdb_id,media_type')
-await upsertAll('follows', followRows, 'user_id,tmdb_id,media_type')
-await upsertAll('episode_watches', episodeRows, 'user_id,tmdb_show_id,season_number,episode_number')
-if (ratingRows.length) await upsertAll('ratings', ratingRows, 'user_id,tmdb_id,media_type')
+await upsertAll('titles', dedupe(titleRows, byTitle), 'tmdb_id,media_type')
+await upsertAll('follows', dedupe(followRows, byTitle), 'user_id,tmdb_id,media_type')
+await upsertAll('episode_watches', dedupe(episodeRows, byEpisode), 'user_id,tmdb_show_id,season_number,episode_number')
+if (ratingRows.length) await upsertAll('ratings', dedupe(ratingRows, byTitle), 'user_id,tmdb_id,media_type')
 
 const completed = followRows.filter((f) => f.status === 'completed').length
 const watching = followRows.filter((f) => f.status === 'watching').length
