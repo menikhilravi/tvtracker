@@ -182,6 +182,73 @@ export. Request the export in TV Time (Settings → account/privacy) and unzip i
    > Movies aren't imported — the export only identifies them by name, with no
    > reliable id to match against TMDB.
 
+## Episode reminders (Web Push) — optional
+
+Get a push notification when a show you follow airs a new episode. This is
+opt-in and needs a few one-time setup steps.
+
+1. **Generate VAPID keys** (a keypair that authorizes your push messages):
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+   Copy the **Public Key** and **Private Key**.
+
+2. **Add the public key to the app** (`.env`, and your host's env vars for prod):
+
+   ```
+   VITE_VAPID_PUBLIC_KEY=<the public key>
+   ```
+
+3. **Create the subscriptions table** — run
+   [`supabase/migrations/0003_push_subscriptions.sql`](supabase/migrations/0003_push_subscriptions.sql)
+   in the Supabase SQL Editor (same as Step 4 above).
+
+4. **Deploy the reminder function and set its secrets**:
+
+   ```bash
+   supabase functions deploy send-reminders
+   supabase secrets set \
+     VAPID_PUBLIC_KEY=<public key> \
+     VAPID_PRIVATE_KEY=<private key> \
+     VAPID_SUBJECT=mailto:you@example.com
+   ```
+
+   (`TMDB_API_KEY` is already set from the proxy step; `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.)
+
+5. **Schedule it daily.** In the Supabase SQL Editor, enable the extensions and
+   add a cron job (runs at 17:00 UTC here — pick a time that suits you). Replace
+   `<PROJECT_REF>` and `<SERVICE_ROLE_KEY>`:
+
+   ```sql
+   create extension if not exists pg_cron;
+   create extension if not exists pg_net;
+
+   select cron.schedule(
+     'daily-episode-reminders',
+     '0 17 * * *',
+     $$
+     select net.http_post(
+       url     := 'https://<PROJECT_REF>.functions.supabase.co/send-reminders',
+       headers := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'Authorization', 'Bearer <SERVICE_ROLE_KEY>'
+       )
+     );
+     $$
+   );
+   ```
+
+6. **Turn it on.** Open the app → **Profile** → **Episode reminders → Enable**,
+   and accept the browser permission prompt.
+
+> **Platform note:** Web Push needs a supporting browser. On **iOS** it only
+> works when the app is **installed to the Home Screen** (iOS 16.4+). To test a
+> send immediately, hit the function URL with `?date=YYYY-MM-DD` set to a day a
+> followed show actually airs.
+
 ## Project layout
 
 ```

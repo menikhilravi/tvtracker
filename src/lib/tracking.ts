@@ -148,6 +148,35 @@ export function useMarkMovieWatched(title: TitleDetail) {
   })
 }
 
+// Watch counts per calendar day (UTC), merging episode + movie watches. Feeds
+// the activity heatmap and streaks. NB: imported history shares the import
+// timestamp, so pre-import dates aren't reconstructed — this is accurate for
+// watches logged in-app going forward.
+export function useWatchActivity() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['watch-activity'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const page = (table: string) =>
+        fetchAllRows<{ watched_at: string }>((from, to) =>
+          supabase!
+            .from(table)
+            .select('watched_at')
+            .order('id', { ascending: true })
+            .range(from, to),
+        )
+      const [eps, movies] = await Promise.all([page('episode_watches'), page('movie_watches')])
+      const byDay = new Map<string, number>()
+      for (const r of [...eps, ...movies]) {
+        const day = r.watched_at.slice(0, 10)
+        byDay.set(day, (byDay.get(day) ?? 0) + 1)
+      }
+      return byDay
+    },
+  })
+}
+
 // The set of TMDB movie ids the user has logged a watch for. Used to show
 // franchise progress ("seen 18/33").
 export function useWatchedMovieIds() {

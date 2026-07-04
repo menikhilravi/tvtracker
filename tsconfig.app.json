@@ -19,5 +19,8 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // sw.ts uses WebWorker libs that clash with DOM here; vite-plugin-pwa
+  // typechecks/compiles it separately, so exclude it from the app build.
+  "exclude": ["src/sw.ts"]
 }
