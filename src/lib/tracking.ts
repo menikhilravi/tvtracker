@@ -277,19 +277,38 @@ export interface FollowRow {
   updated_at: string
 }
 
+// PostgREST caps a single response at 1000 rows, so anything that can exceed
+// that (a large library, thousands of episode watches) must be paged. This
+// walks .range() until a short page signals the end.
+const PAGE_SIZE = 1000
+async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const all: T[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await build(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    const rows = data ?? []
+    all.push(...rows)
+    if (rows.length < PAGE_SIZE) return all
+  }
+}
+
 export function useFollows() {
   const { session } = useAuth()
   return useQuery({
     queryKey: ['follows'],
     enabled: Boolean(supabase && session),
-    queryFn: async (): Promise<FollowRow[]> => {
-      const { data, error } = await supabase!
-        .from('follows')
-        .select('tmdb_id, media_type, status, name, poster_path, updated_at')
-        .order('updated_at', { ascending: false })
-      if (error) throw error
-      return data as FollowRow[]
-    },
+    queryFn: (): Promise<FollowRow[]> =>
+      // Paginate by the unique id (updated_at has ties across the import batch,
+      // which would skip/duplicate rows). Callers re-sort for display.
+      fetchAllRows<FollowRow>((from, to) =>
+        supabase!
+          .from('follows')
+          .select('tmdb_id, media_type, status, name, poster_path, updated_at')
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
   })
 }
 
@@ -300,12 +319,19 @@ export function useAllEpisodeWatches() {
     queryKey: ['episode-watches', 'all'],
     enabled: Boolean(supabase && session),
     queryFn: async () => {
-      const { data, error } = await supabase!
-        .from('episode_watches')
-        .select('tmdb_show_id, season_number, episode_number')
-      if (error) throw error
+      const rows = await fetchAllRows<{
+        tmdb_show_id: number
+        season_number: number
+        episode_number: number
+      }>((from, to) =>
+        supabase!
+          .from('episode_watches')
+          .select('tmdb_show_id, season_number, episode_number')
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
       const map = new Map<number, Set<string>>()
-      for (const r of data) {
+      for (const r of rows) {
         const set = map.get(r.tmdb_show_id) ?? new Set<string>()
         set.add(`S${r.season_number}E${r.episode_number}`)
         map.set(r.tmdb_show_id, set)
