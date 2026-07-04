@@ -1,0 +1,164 @@
+# TV Tracker
+
+A personal, self-owned **TV & movie tracker** — a free replacement for TV Time (which shuts down July 15, 2026). It's an installable **PWA**: open it in Chrome on Android, "Add to Home screen," and it behaves like an app (full-screen, offline, home-screen icon). $0 to build, host, and run.
+
+- **App:** Vite + React + TypeScript, Tailwind v4, TanStack Query, `vite-plugin-pwa`
+- **Metadata:** TMDB, via a server-side proxy (your key never ships to the browser)
+- **Your data (watchlist / watches / ratings):** Supabase Postgres + Auth, protected by Row-Level Security
+
+## What works today (MVP)
+
+- 🔍 Search movies & TV (debounced)
+- 📄 Detail screen: poster, overview, cast, seasons/episodes
+- ➕ Track a title (watchlist → watching → completed) and remove
+- 👁 Mark a **movie** watched; toggle individual **episodes** watched
+- 🏠 Home shelves: *Watching* and *Watchlist*
+- 🔐 Passwordless email magic-link sign-in
+- 📲 Installable + offline shell + cached posters
+
+Roadmap (see [the plan](../../.claude/plans)): "Up Next" episode feed, upcoming-episode calendar, stats, web-push reminders, and Trakt / TV Time import.
+
+---
+
+## Setup — do these in order (all free, ~15 min)
+
+Follow the steps top to bottom. Do not skip ahead; each one builds on the last.
+You'll gather two values along the way (`SUPABASE_URL`, `ANON_KEY`) and one
+secret (`TMDB token`).
+
+### Step 1 — Install the code
+
+```bash
+npm install
+```
+
+### Step 2 — Get your TMDB token (metadata source)
+
+1. Go to https://www.themoviedb.org and create a free account.
+2. Open **Settings → API** and request a key (choose "Developer", personal use).
+3. Copy the **API Read Access Token** (the long v4 token). Keep it somewhere
+   safe for Step 5. **Do not put it in `.env`** — it stays server-side.
+
+### Step 3 — Create your Supabase project (database + login)
+
+1. Go to https://supabase.com and create a free account, then a new project.
+   Pick a database password and wait ~2 min for it to provision.
+2. Open **Project Settings → API** and copy two values:
+   - **Project URL** → this is your `SUPABASE_URL`
+   - **anon public** key → this is your `ANON_KEY`
+
+### Step 4 — Create the database tables
+
+1. In your Supabase project, open the **SQL Editor**.
+2. Open the file [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
+   from this repo, copy its entire contents, paste into the SQL Editor, and
+   click **Run**. You should see "Success". (This creates the tables and the
+   security rules that keep your data private.)
+
+### Step 5 — Deploy the TMDB proxy (hides your token)
+
+Install the Supabase CLI and connect it to your project, then deploy:
+
+```bash
+npm i -g supabase
+supabase login
+supabase link --project-ref <your-project-ref>   # ref is in your project URL / dashboard
+
+supabase functions deploy tmdb-proxy
+supabase secrets set TMDB_API_KEY=<paste the TMDB token from Step 2>
+```
+
+### Step 6 — Point the app at your project
+
+Create your local env file and paste in the two values from Step 3:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```
+VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-public-key
+```
+
+(The app figures out the proxy URL automatically from `VITE_SUPABASE_URL`.)
+
+### Step 7 — Run it locally
+
+```bash
+npm run dev
+```
+
+Open **http://localhost:5173**. Try: **Search** a show → open it → **+ Track**
+and mark an episode watched. Sign in first on the **Profile** tab (enter your
+email, click the magic link it sends you).
+
+> If sign-in emails don't arrive: in Supabase, **Authentication → Providers →
+> Email** must be enabled (it is by default), and add `http://localhost:5173`
+> under **Authentication → URL Configuration**.
+
+You now have a fully working app on your computer. The steps below put it on
+your phone.
+
+---
+
+## Put it on your phone (free)
+
+### Step 8 — Deploy to Cloudflare Pages
+
+1. Push this repo to GitHub.
+2. At https://pages.cloudflare.com, create a project and connect that repo.
+3. Set **Build command** = `npm run build`, **Output directory** = `dist`.
+4. Under the project's **Settings → Environment variables**, add the same two
+   values from Step 6: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+5. Deploy. You'll get a URL like `https://tvtracker.pages.dev`.
+6. Back in Supabase **Authentication → URL Configuration**, add your Pages URL.
+
+Deep links (refreshing on a `/title/...` page) already work — this repo ships
+the SPA fallback config for you: `public/_redirects` (Cloudflare Pages &
+Netlify) and `vercel.json` (Vercel). Nothing to add.
+
+**On Vercel instead?** Same flow: import the repo, framework preset auto-detects
+"Vite", output `dist`, add the two `VITE_*` env vars, deploy. `vercel.json`
+handles routing. Note Vercel's Hobby (free) plan is **non-commercial/personal
+use only** — fine for a private tracker. Cloudflare Pages has no such
+restriction, which is why it's the default recommendation.
+
+### Step 9 — Install to your home screen
+
+On your Android phone, open the Pages URL in **Chrome → ⋮ menu → Add to Home
+screen**. It now launches full-screen like a native app.
+
+> Optional, later: wrap it as a real Play Store app with Bubblewrap/TWA. The $25
+> Play Store fee is one-time and entirely optional — the home-screen install
+> above is free.
+
+---
+
+## Project layout
+
+```
+src/
+  lib/
+    tmdb.ts        TMDB proxy client (normalized shapes)
+    supabase.ts    Supabase client (null-safe if unconfigured)
+    auth.tsx       AuthProvider + useAuth (magic-link)
+    tracking.ts    follows / episode+movie watches / ratings hooks
+    types.ts       shared types
+    queryClient.ts TanStack Query config
+  components/       Layout (bottom nav), Poster
+  pages/            Home, Search, TitleDetail, Profile
+supabase/
+  migrations/0001_init.sql     schema + Row-Level Security
+  functions/tmdb-proxy/        allowlisted TMDB proxy (Deno)
+  config.toml
+```
+
+## Notes
+
+- **Personal / non-commercial use only.** Commercial use of TMDB requires a
+  separate agreement with TMDB.
+- The Supabase free project **pauses after ~1 week idle** — one click to resume.
+- Without Supabase configured, search/browse still work; tracking is disabled.

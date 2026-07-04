@@ -1,0 +1,8 @@
+# Minimal Supabase CLI config. Set `project_id` to your project ref after
+# running `supabase link --project-ref <ref>`.
+project_id = "tvtracker"
+
+[functions.tmdb-proxy]
+# The proxy only serves public, read-only metadata, so it does not require a
+# logged-in user. This lets the app call it with just the anon key.
+verify_jwt = false

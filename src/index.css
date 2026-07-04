@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-2: #334155;
+  --color-brand: #6366f1;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: #e2e8f0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect the phone's safe areas when installed as a PWA. */
+#root {
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
