@@ -249,6 +249,73 @@ export function useToggleEpisode(show: TitleDetail) {
   })
 }
 
+// --- Episode ratings --------------------------------------------------------
+
+// Your scores for a show's episodes, as a Map of "S{n}E{n}" -> score (1–10).
+export function useEpisodeRatings(showId: number) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['episode-ratings', showId],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const { data, error } = await supabase!
+        .from('episode_ratings')
+        .select('season_number, episode_number, score')
+        .eq('tmdb_show_id', showId)
+      if (error) throw error
+      const map = new Map<string, number>()
+      for (const r of data) map.set(`S${r.season_number}E${r.episode_number}`, r.score)
+      return map
+    },
+  })
+}
+
+// Set (score 1–10) or clear (null) a single episode's rating. Rating an episode
+// also marks it watched, since you can only rate what you've seen.
+export function useRateEpisode(show: TitleDetail) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { season: number; episode: number; score: number | null }) => {
+      if (!supabase) throw new Error('Not configured')
+      await cacheTitle(show)
+      if (args.score === null) {
+        await supabase
+          .from('episode_ratings')
+          .delete()
+          .eq('tmdb_show_id', show.id)
+          .eq('season_number', args.season)
+          .eq('episode_number', args.episode)
+        return
+      }
+      await supabase.from('episode_ratings').upsert(
+        {
+          tmdb_show_id: show.id,
+          season_number: args.season,
+          episode_number: args.episode,
+          score: args.score,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' },
+      )
+      // Rating implies watched — mark it (idempotent upsert) and start the show.
+      await supabase.from('episode_watches').upsert(
+        { tmdb_show_id: show.id, season_number: args.season, episode_number: args.episode },
+        { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' },
+      )
+      await promoteToWatching(show)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['episode-ratings', show.id] })
+      qc.invalidateQueries({ queryKey: ['episode-watches'] })
+      qc.invalidateQueries({ queryKey: ['history'] })
+      qc.invalidateQueries({ queryKey: ['up-next'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['follow', show.id, show.media_type] })
+    },
+  })
+}
+
 // Mark an entire season watched or unwatched in one shot.
 export function useToggleSeason(show: TitleDetail) {
   const qc = useQueryClient()

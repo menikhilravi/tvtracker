@@ -4,6 +4,8 @@ import { Home } from './pages/Home'
 import { Search } from './pages/Search'
 import { TitleDetail } from './pages/TitleDetail'
 import { Profile } from './pages/Profile'
+import { Settings } from './pages/Settings'
+import { Stats } from './pages/Stats'
 import { Calendar } from './pages/Calendar'
 import { History } from './pages/History'
 
@@ -17,6 +19,8 @@ const router = createBrowserRouter([
       { path: '/title/:mediaType/:id', element: <TitleDetail /> },
       { path: '/history', element: <History /> },
       { path: '/profile', element: <Profile /> },
+      { path: '/settings', element: <Settings /> },
+      { path: '/stats', element: <Stats /> },
     ],
   },
 ])

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getTitle, getSeason, getRecommendations, getCollection, IMG } from '../lib/tmdb'
-import type { MediaType, TitleDetail as TitleDetailType } from '../lib/types'
+import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { PosterRail, trackedKey } from '../components/PosterRail'
 import { RatingStars } from '../components/RatingStars'
@@ -15,6 +15,8 @@ import {
   useWatchedMovieIds,
   useMarkMovieWatched,
   useEpisodeWatches,
+  useEpisodeRatings,
+  useRateEpisode,
   useToggleEpisode,
   useToggleSeason,
   useRating,
@@ -432,6 +434,7 @@ function MovieLogButton({ onLog, justLogged }: { onLog: () => void; justLogged: 
 
 function RatingSection({ title }: { title: TitleDetailType }) {
   const { rating, save, enabled } = useRating(title)
+  const epRatings = useEpisodeRatings(title.id)
   const [review, setReview] = useState('')
   const [editingReview, setEditingReview] = useState(false)
 
@@ -442,6 +445,12 @@ function RatingSection({ title }: { title: TitleDetailType }) {
     setEditingReview(true)
   }
 
+  // For TV, offer to derive the overall score from your episode ratings.
+  const epScores = title.media_type === 'tv' ? [...(epRatings.data?.values() ?? [])] : []
+  const epAvg = epScores.length
+    ? epScores.reduce((a, b) => a + b, 0) / epScores.length
+    : null
+
   return (
     <div className="mt-4 rounded-2xl border border-line bg-surface/60 p-4">
       <div className="flex items-center justify-between">
@@ -451,6 +460,23 @@ function RatingSection({ title }: { title: TitleDetailType }) {
           onChange={(score) => save.mutate({ score, review: rating?.review })}
         />
       </div>
+
+      {epAvg !== null && (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-bg/40 px-3 py-2">
+          <span className="text-xs text-muted">
+            Avg of {epScores.length} episode {epScores.length === 1 ? 'rating' : 'ratings'}:{' '}
+            <span className="font-semibold text-ink">{epAvg.toFixed(1)}</span>
+          </span>
+          {Math.round(epAvg) !== (rating?.score ?? -1) && (
+            <button
+              onClick={() => save.mutate({ score: Math.round(epAvg), review: rating?.review })}
+              className="shrink-0 rounded-lg bg-brand-gradient px-2.5 py-1 text-xs font-semibold text-white active:scale-95"
+            >
+              Use as show rating
+            </button>
+          )}
+        </div>
+      )}
 
       {editingReview ? (
         <div className="mt-3">
@@ -500,6 +526,8 @@ function Seasons({ show }: { show: TitleDetailType }) {
   const [open, setOpen] = useState<number | null>(null)
   const watches = useEpisodeWatches(show.id)
   const watchedSet = watches.data ?? new Set<string>()
+  const ratings = useEpisodeRatings(show.id)
+  const ratingMap = ratings.data ?? new Map<string, number>()
 
   return (
     <section className="mt-7">
@@ -535,7 +563,12 @@ function Seasons({ show }: { show: TitleDetailType }) {
                 </span>
               </button>
               {open === s.seasonNumber && (
-                <SeasonEpisodes show={show} seasonNumber={s.seasonNumber} watchedSet={watchedSet} />
+                <SeasonEpisodes
+                  show={show}
+                  seasonNumber={s.seasonNumber}
+                  watchedSet={watchedSet}
+                  ratingMap={ratingMap}
+                />
               )}
             </div>
           )
@@ -577,10 +610,12 @@ function SeasonEpisodes({
   show,
   seasonNumber,
   watchedSet,
+  ratingMap,
 }: {
   show: TitleDetailType
   seasonNumber: number
   watchedSet: Set<string>
+  ratingMap: Map<string, number>
 }) {
   const { session } = useAuth()
   const { data: episodes, isLoading } = useQuery({
@@ -589,6 +624,7 @@ function SeasonEpisodes({
   })
   const toggle = useToggleEpisode(show)
   const toggleSeason = useToggleSeason(show)
+  const [openEp, setOpenEp] = useState<Episode | null>(null)
 
   if (isLoading) return <p className="p-3 text-xs text-muted">Loading episodes…</p>
   if (!episodes || episodes.length === 0)
@@ -618,14 +654,24 @@ function SeasonEpisodes({
         {episodes.map((e) => {
           const key = `S${e.seasonNumber}E${e.episodeNumber}`
           const watched = watchedSet.has(key)
+          const score = ratingMap.get(key)
           return (
             <li key={key} className="flex items-center gap-3 p-3">
-              <div className="min-w-0 flex-1">
+              {/* Tap the text to open episode details + rating. */}
+              <button
+                onClick={() => setOpenEp(e)}
+                className="min-w-0 flex-1 text-left active:opacity-70"
+              >
                 <div className="truncate text-sm">
                   <span className="text-faint">{e.episodeNumber}.</span> {e.name}
                 </div>
-                {e.airDate && <div className="text-[11px] text-faint">{e.airDate}</div>}
-              </div>
+                <div className="flex items-center gap-2 text-[11px] text-faint">
+                  {e.airDate && <span>{e.airDate}</span>}
+                  {score !== undefined && (
+                    <span className="font-semibold text-amber-400">★ {score}</span>
+                  )}
+                </div>
+              </button>
               <button
                 disabled={!session}
                 onClick={() => toggle.mutate({ season: e.seasonNumber, episode: e.episodeNumber, watched })}
@@ -640,6 +686,108 @@ function SeasonEpisodes({
           )
         })}
       </ul>
+
+      {openEp && (
+        <EpisodeModal
+          show={show}
+          episode={openEp}
+          watched={watchedSet.has(`S${openEp.seasonNumber}E${openEp.episodeNumber}`)}
+          score={ratingMap.get(`S${openEp.seasonNumber}E${openEp.episodeNumber}`) ?? null}
+          onClose={() => setOpenEp(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Full-screen episode details with a per-episode rating. Rating an episode
+// also marks it watched (see useRateEpisode).
+function EpisodeModal({
+  show,
+  episode,
+  watched,
+  score,
+  onClose,
+}: {
+  show: TitleDetailType
+  episode: Episode
+  watched: boolean
+  score: number | null
+  onClose: () => void
+}) {
+  const { session } = useAuth()
+  const rate = useRateEpisode(show)
+  const toggle = useToggleEpisode(show)
+  const still = IMG(episode.stillPath, 'w500')
+
+  // Close on Escape; lock background scroll while open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-bg">
+      <div className="relative shrink-0">
+        {still ? (
+          <img src={still} alt="" className="h-52 w-full object-cover" />
+        ) : (
+          <div className="h-52 w-full bg-gradient-to-br from-surface-2 to-surface" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/40 to-transparent" />
+        <button
+          onClick={onClose}
+          className="glass absolute right-4 top-12 grid h-9 w-9 place-items-center rounded-full border text-lg active:scale-90"
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="relative -mt-8 flex-1 overflow-y-auto px-5 pb-8">
+        <p className="text-xs font-semibold text-brand">
+          S{episode.seasonNumber} · E{episode.episodeNumber}
+        </p>
+        <h2 className="mt-1 text-xl font-bold tracking-tight text-balance">{episode.name}</h2>
+        {episode.airDate && <p className="mt-1 text-xs text-faint">{episode.airDate}</p>}
+        {episode.overview && (
+          <p className="mt-4 text-sm leading-relaxed text-ink/80">{episode.overview}</p>
+        )}
+
+        {session && (
+          <div className="mt-6 rounded-2xl border border-line bg-surface/60 p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-muted">Your rating</span>
+              <RatingStars
+                score={score}
+                onChange={(s) =>
+                  rate.mutate({ season: episode.seasonNumber, episode: episode.episodeNumber, score: s })
+                }
+              />
+            </div>
+            <button
+              onClick={() =>
+                toggle.mutate({
+                  season: episode.seasonNumber,
+                  episode: episode.episodeNumber,
+                  watched,
+                })
+              }
+              className={`mt-3 w-full rounded-xl py-2.5 text-sm font-semibold transition active:scale-[0.98] ${
+                watched ? 'border border-line bg-surface text-muted' : 'bg-brand-gradient text-white'
+              }`}
+            >
+              {watched ? '✓ Watched — tap to unmark' : 'Mark watched'}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
