@@ -15,13 +15,27 @@ interface FollowRow {
   status: string
   name: string | null
   poster_path: string | null
+  updated_at: string
 }
 
 type MediaFilter = 'all' | 'tv' | 'movie'
+type SortKey = 'recent' | 'title'
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'recent', label: 'Recently added' },
+  { key: 'title', label: 'Title (A–Z)' },
+]
+
+function sortRows(rows: FollowRow[], sort: SortKey) {
+  const items = [...rows]
+  if (sort === 'title') return items.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+  return items.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+}
 
 export function Home() {
   const { session, loading } = useAuth()
   const [filter, setFilter] = useState<MediaFilter>('all')
+  const [watchlistSort, setWatchlistSort] = useState<SortKey>('recent')
 
   const { data: follows } = useQuery({
     queryKey: ['follows'],
@@ -29,7 +43,7 @@ export function Home() {
     queryFn: async (): Promise<FollowRow[]> => {
       const { data, error } = await supabase!
         .from('follows')
-        .select('tmdb_id, media_type, status, name, poster_path')
+        .select('tmdb_id, media_type, status, name, poster_path, updated_at')
         .order('updated_at', { ascending: false })
       if (error) throw error
       return data as FollowRow[]
@@ -75,7 +89,10 @@ export function Home() {
 
   const inFilter = (f: FollowRow) => filter === 'all' || f.media_type === filter
   const watching = active.filter((f) => f.status === 'watching' && inFilter(f))
-  const watchlist = active.filter((f) => f.status === 'watchlist' && inFilter(f))
+  const watchlist = sortRows(
+    active.filter((f) => f.status === 'watchlist' && inFilter(f)),
+    watchlistSort,
+  )
 
   return (
     <div className="px-5 pt-14">
@@ -119,7 +136,15 @@ export function Home() {
       )}
 
       <Shelf title="Continue watching" rows={watching} />
-      <Shelf title="Watchlist" rows={watchlist} />
+      <Shelf
+        title="Watchlist"
+        rows={watchlist}
+        action={
+          watchlist.length > 1 ? (
+            <SortSelect value={watchlistSort} onChange={setWatchlistSort} />
+          ) : null
+        }
+      />
 
       {active.length > 0 && watching.length === 0 && watchlist.length === 0 && (
         <p className="mb-7 rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
@@ -188,11 +213,38 @@ function Stat({ label, value }: { label: string; value: number }) {
   )
 }
 
-function Shelf({ title, rows }: { title: string; rows: FollowRow[] }) {
+function SortSelect({ value, onChange }: { value: SortKey; onChange: (s: SortKey) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as SortKey)}
+      className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+    >
+      {SORT_OPTIONS.map((o) => (
+        <option key={o.key} value={o.key}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function Shelf({
+  title,
+  rows,
+  action,
+}: {
+  title: string
+  rows: FollowRow[]
+  action?: React.ReactNode
+}) {
   if (rows.length === 0) return null
   return (
     <section className="mb-7">
-      <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">{title}</h2>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold tracking-wide text-muted">{title}</h2>
+        {action}
+      </div>
       <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
         {rows.map((r) => (
           <Link
