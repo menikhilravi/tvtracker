@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 interface AuthState {
   session: Session | null
   loading: boolean
-  signInWithEmail: (email: string) => Promise<{ error: string | null }>
+  signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
 
@@ -31,12 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthState = {
     session,
     loading,
-    async signInWithEmail(email: string) {
+    async signInWithPassword(email: string, password: string) {
       if (!supabase) return { error: 'Supabase is not configured.' }
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.origin },
-      })
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
       return { error: error?.message ?? null }
     },
     async signOut() {

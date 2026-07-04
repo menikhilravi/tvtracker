@@ -3,9 +3,10 @@ import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
 
 export function Profile() {
-  const { session, signInWithEmail, signOut } = useAuth()
+  const { session, signInWithPassword, signOut } = useAuth()
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   if (!isSupabaseConfigured) {
@@ -40,37 +41,51 @@ export function Profile() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    const { error } = await signInWithEmail(email)
+    setSubmitting(true)
+    const { error } = await signInWithPassword(email, password)
+    setSubmitting(false)
     if (error) setError(error)
-    else setSent(true)
   }
 
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold">Sign in</h1>
-      {sent ? (
-        <p className="mt-4 rounded-xl bg-slate-800 p-4 text-sm text-slate-300">
-          Check <b>{email}</b> for a magic link. Open it on this device to finish signing in.
+      <form onSubmit={submit} className="mt-4 space-y-3">
+        <p className="text-sm text-slate-400">
+          Sign in with the email and password for your account.
         </p>
-      ) : (
-        <form onSubmit={submit} className="mt-4 space-y-3">
-          <p className="text-sm text-slate-400">
-            We’ll email you a one-tap magic link — no password.
-          </p>
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 outline-none focus:border-indigo-500"
-          />
-          <button type="submit" className="w-full rounded-xl bg-indigo-600 py-3 font-semibold">
-            Send magic link
-          </button>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-        </form>
-      )}
+        <input
+          type="email"
+          autoComplete="username"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 outline-none focus:border-indigo-500"
+        />
+        <input
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 outline-none focus:border-indigo-500"
+        />
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-xl bg-indigo-600 py-3 font-semibold disabled:opacity-50"
+        >
+          {submitting ? 'Signing in…' : 'Sign in'}
+        </button>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+      </form>
+      <p className="mt-4 text-xs text-slate-500">
+        No account yet? Create your user in the Supabase dashboard under
+        Authentication → Users → Add user (set a password and confirm the email),
+        then sign in here.
+      </p>
     </div>
   )
 }

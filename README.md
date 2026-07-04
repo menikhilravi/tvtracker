@@ -13,7 +13,7 @@ A personal, self-owned **TV & movie tracker** — a free replacement for TV Time
 - ➕ Track a title (watchlist → watching → completed) and remove
 - 👁 Mark a **movie** watched; toggle individual **episodes** watched
 - 🏠 Home shelves: *Watching* and *Watchlist*
-- 🔐 Passwordless email magic-link sign-in
+- 🔐 Email + password sign-in
 - 📲 Installable + offline shell + cached posters
 
 Roadmap (see [the plan](../../.claude/plans)): "Up Next" episode feed, upcoming-episode calendar, stats, web-push reminders, and Trakt / TV Time import.
@@ -91,13 +91,14 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key
 npm run dev
 ```
 
-Open **http://localhost:5173**. Try: **Search** a show → open it → **+ Track**
-and mark an episode watched. Sign in first on the **Profile** tab (enter your
-email, click the magic link it sends you).
+Open **http://localhost:5173**. First create your account: in Supabase,
+**Authentication → Users → Add user**, enter your email + a password and tick
+**Auto Confirm User**. Then on the **Profile** tab sign in with that email and
+password. Now **Search** a show → open it → **+ Track** and mark an episode
+watched.
 
-> If sign-in emails don't arrive: in Supabase, **Authentication → Providers →
-> Email** must be enabled (it is by default), and add `http://localhost:5173`
-> under **Authentication → URL Configuration**.
+> Sign-in uses email + password (no confirmation emails), so there are no email
+> rate limits to worry about.
 
 You now have a fully working app on your computer. The steps below put it on
 your phone.
@@ -144,7 +145,7 @@ src/
   lib/
     tmdb.ts        TMDB proxy client (normalized shapes)
     supabase.ts    Supabase client (null-safe if unconfigured)
-    auth.tsx       AuthProvider + useAuth (magic-link)
+    auth.tsx       AuthProvider + useAuth (email + password)
     tracking.ts    follows / episode+movie watches / ratings hooks
     types.ts       shared types
     queryClient.ts TanStack Query config
