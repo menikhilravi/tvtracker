@@ -27,6 +27,8 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^(movie|tv)\/popular$/, params: ['page'] },
   { pattern: /^(movie|tv)\/top_rated$/, params: ['page'] },
   { pattern: /^(movie|tv)\/\d+\/recommendations$/, params: ['page'] },
+  // A movie franchise/collection and its parts (belongs_to_collection).
+  { pattern: /^collection\/\d+$/, params: [] },
   // Genre browsing: the genre list, then discover filtered by genre.
   { pattern: /^genre\/(movie|tv)\/list$/, params: [] },
   { pattern: /^discover\/(movie|tv)$/, params: ['with_genres', 'sort_by', 'page', 'include_adult'] },

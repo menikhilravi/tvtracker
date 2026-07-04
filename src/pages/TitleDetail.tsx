@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getTitle, getSeason, getRecommendations, IMG } from '../lib/tmdb'
+import { getTitle, getSeason, getRecommendations, getCollection, IMG } from '../lib/tmdb'
 import type { MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { PosterRail, trackedKey } from '../components/PosterRail'
@@ -12,6 +12,7 @@ import type { WatchProvider } from '../lib/types'
 import {
   useFollow,
   useFollows,
+  useWatchedMovieIds,
   useMarkMovieWatched,
   useEpisodeWatches,
   useToggleEpisode,
@@ -114,6 +115,8 @@ export function TitleDetail() {
 
         <WhereToWatch title={title} />
 
+        {title.media_type === 'movie' && <CollectionSection title={title} />}
+
         {title.media_type === 'tv' && <Seasons show={title} />}
 
         {title.cast.length > 0 && (
@@ -142,6 +145,69 @@ export function TitleDetail() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Franchise progress for a movie that belongs to a TMDB collection — how many
+// of the saga you've watched, and every entry (watched ones checked, the
+// current one ringed).
+function CollectionSection({ title }: { title: TitleDetailType }) {
+  const col = title.collection
+  const { data } = useQuery({
+    queryKey: ['collection', col?.id],
+    queryFn: () => getCollection(col!.id),
+    enabled: Boolean(col),
+  })
+  const { data: watched } = useWatchedMovieIds()
+
+  // A "collection" of one is just this movie — not worth a section.
+  if (!col || !data || data.parts.length < 2) return null
+
+  const seen = data.parts.filter((p) => watched?.has(p.id)).length
+  const total = data.parts.length
+  const pct = Math.round((seen / total) * 100)
+
+  return (
+    <section className="mt-7">
+      <h2 className="text-sm font-semibold tracking-wide text-muted">{data.name}</h2>
+      <p className="mt-1 text-xs text-faint">
+        Seen {seen}/{total} in this franchise
+      </p>
+      <div className="mt-2 mb-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+        <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+        {data.parts.map((p) => {
+          const isSeen = watched?.has(p.id)
+          const isCurrent = p.id === title.id
+          return (
+            <Link
+              key={p.id}
+              to={`/title/movie/${p.id}`}
+              className="w-24 shrink-0 active:scale-[0.97]"
+            >
+              <div className="relative">
+                <Poster
+                  path={p.posterPath}
+                  alt={p.title}
+                  size="w342"
+                  className={`aspect-[2/3] w-24 shadow-lg shadow-black/40 ${
+                    isCurrent ? 'ring-2 ring-brand' : ''
+                  }`}
+                />
+                {isSeen && (
+                  <span className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-watched text-[11px] font-bold text-bg shadow">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <p className="mt-1.5 truncate text-[11px] font-medium text-ink/90">{p.title}</p>
+              <p className="truncate text-[10px] text-faint">{p.year ?? ''}</p>
+            </Link>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 

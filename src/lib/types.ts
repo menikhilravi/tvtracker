@@ -34,6 +34,13 @@ export interface EpisodeRef {
   airDate: string | null
 }
 
+// A movie franchise (TMDB "belongs_to_collection") and its member movies.
+export interface Collection {
+  id: number
+  name: string
+  parts: SearchResult[]
+}
+
 // A single streaming/rent/buy provider for a title in one region (from TMDB's
 // watch-provider data, sourced from JustWatch).
 export interface WatchProvider {
@@ -73,4 +80,6 @@ export interface TitleDetail {
   ended: boolean
   // Streaming/rent/buy availability, keyed by region code (e.g. 'US', 'GB').
   watchProviders: Record<string, RegionProviders>
+  // movie only: the franchise this belongs to, if any (id/name for a lookup).
+  collection: { id: number; name: string; posterPath: string | null } | null
 }

@@ -3,6 +3,7 @@
 // shapes from `types.ts` so components never touch raw TMDB JSON.
 
 import type {
+  Collection,
   Episode,
   EpisodeRef,
   MediaType,
@@ -111,6 +112,7 @@ interface RawDetail {
   next_episode_to_air?: RawEpisodeRef | null
   status?: string
   'watch/providers'?: { results?: Record<string, RawRegionProviders> }
+  belongs_to_collection?: { id: number; name: string; poster_path?: string | null } | null
 }
 
 interface RawProvider {
@@ -207,7 +209,24 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     showStatus: data.status ?? null,
     ended: mediaType === 'tv' && (data.status === 'Ended' || data.status === 'Canceled'),
     watchProviders: normalizeProviders(data['watch/providers']?.results),
+    collection: data.belongs_to_collection
+      ? {
+          id: data.belongs_to_collection.id,
+          name: data.belongs_to_collection.name,
+          posterPath: data.belongs_to_collection.poster_path ?? null,
+        }
+      : null,
   }
+}
+
+// A movie franchise and its member movies (ordered by release date), for the
+// "watch the whole saga" view.
+export async function getCollection(id: number): Promise<Collection> {
+  const data = await proxy<{ id: number; name: string; parts?: RawMultiItem[] }>(`collection/${id}`)
+  const parts = toResults(data.parts ?? [], 'movie').sort((a, b) =>
+    (a.year ?? '9999').localeCompare(b.year ?? '9999'),
+  )
+  return { id: data.id, name: data.name, parts }
 }
 
 // --- Season episodes --------------------------------------------------------

@@ -140,7 +140,31 @@ export function useMarkMovieWatched(title: TitleDetail) {
       await cacheTitle(title)
       await supabase.from('movie_watches').insert({ tmdb_movie_id: title.id })
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['history'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['history'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['movie-watches'] })
+    },
+  })
+}
+
+// The set of TMDB movie ids the user has logged a watch for. Used to show
+// franchise progress ("seen 18/33").
+export function useWatchedMovieIds() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['movie-watches', 'ids'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ tmdb_movie_id: number }>((from, to) =>
+        supabase!
+          .from('movie_watches')
+          .select('tmdb_movie_id')
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
+      return new Set(rows.map((r) => r.tmdb_movie_id))
+    },
   })
 }
 
