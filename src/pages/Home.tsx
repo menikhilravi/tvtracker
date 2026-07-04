@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
 import { UpNextRail } from '../components/UpNext'
+import { Logo } from '../components/Logo'
 import { useFollows, type FollowRow } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
 
@@ -33,8 +34,8 @@ export function Home() {
   if (!session) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-8 text-center">
-        <div className="grid h-20 w-20 place-items-center rounded-3xl bg-brand-gradient text-4xl shadow-2xl shadow-brand/30">
-          📺
+        <div className="h-20 w-20 overflow-hidden rounded-3xl shadow-2xl shadow-brand/30">
+          <Logo className="h-full w-full" />
         </div>
         <h1 className="mt-6 text-2xl font-bold tracking-tight">TV Tracker</h1>
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted">

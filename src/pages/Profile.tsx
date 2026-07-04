@@ -10,6 +10,7 @@ import {
   type LibraryItem,
 } from '../lib/tracking'
 import { Poster } from '../components/Poster'
+import { Logo } from '../components/Logo'
 import { usePersistedState, useScrollMemory } from '../lib/uiState'
 
 export function Profile() {
@@ -81,8 +82,8 @@ export function Profile() {
   return (
     <div className="flex min-h-dvh flex-col justify-center px-6">
       <div className="mb-8 text-center">
-        <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-brand-gradient text-3xl shadow-2xl shadow-brand/30">
-          📺
+        <div className="mx-auto h-16 w-16 overflow-hidden rounded-3xl shadow-2xl shadow-brand/30">
+          <Logo className="h-full w-full" />
         </div>
         <h1 className="mt-5 text-2xl font-bold tracking-tight">Welcome back</h1>
         <p className="mt-1.5 text-sm text-muted">Sign in to your tracker</p>

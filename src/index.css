@@ -7,8 +7,9 @@
   --color-surface: #14141f;
   --color-surface-2: #1c1c2b;
   --color-line: #ffffff14;
-  --color-brand: #7c5cff;
-  --color-brand-2: #b16bff;
+  /* Cinematic accent: crimson → warm rose, matching the clapperboard logo. */
+  --color-brand: #e11d48;
+  --color-brand-2: #f43f5e;
   --color-watched: #34d399;
 
   --color-ink: #f4f4f8;
@@ -31,8 +32,8 @@ body {
   background-color: var(--color-bg);
   /* Subtle top-lit glow so the dark bg has depth instead of feeling flat. */
   background-image:
-    radial-gradient(120% 60% at 50% -10%, #241a4d55 0%, transparent 60%),
-    radial-gradient(80% 50% at 100% 0%, #3a1a5533 0%, transparent 55%);
+    radial-gradient(120% 60% at 50% -10%, #3a0f1f55 0%, transparent 60%),
+    radial-gradient(80% 50% at 100% 0%, #45161a33 0%, transparent 55%);
   background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
