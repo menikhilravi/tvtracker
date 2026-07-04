@@ -11,82 +11,113 @@ interface ShowRow {
   poster_path: string | null
 }
 
+// A unified timeline entry: either a TV episode airing or a movie release.
 interface Upcoming {
+  key: string
+  mediaType: 'tv' | 'movie'
   tmdbId: number
   name: string | null
   posterPath: string | null
-  season: number
-  episode: number
-  epName: string | null
-  airDate: string
+  date: string
+  subtitle: string
 }
 
-export function Calendar() {
-  const { session } = useAuth()
-
-  // Followed TV shows we should look for upcoming episodes on.
-  const { data: shows } = useQuery({
-    queryKey: ['calendar', 'shows'],
+// Followed rows of one media type we should look for upcoming dates on.
+function useFollowedForCalendar(mediaType: 'tv' | 'movie', session: unknown) {
+  return useQuery({
+    queryKey: ['calendar', mediaType],
     enabled: Boolean(supabase && session),
     queryFn: async (): Promise<ShowRow[]> => {
       const { data, error } = await supabase!
         .from('follows')
         .select('tmdb_id, name, poster_path')
-        .eq('media_type', 'tv')
+        .eq('media_type', mediaType)
         .in('status', ['watching', 'watchlist'])
       if (error) throw error
       return data as ShowRow[]
     },
   })
+}
 
-  // Fetch each show's detail (cached & shared with the detail screen) and pull
-  // out its next scheduled episode.
-  const details = useQueries({
+export function Calendar() {
+  const { session } = useAuth()
+
+  const { data: shows } = useFollowedForCalendar('tv', session)
+  const { data: movies } = useFollowedForCalendar('movie', session)
+
+  // Fetch each title's detail (cached & shared with the detail screen) and pull
+  // out its next scheduled episode (TV) or release date (movie).
+  const tvDetails = useQueries({
     queries: (shows ?? []).map((s) => ({
       queryKey: ['title', 'tv', s.tmdb_id],
       queryFn: () => getTitle('tv', s.tmdb_id),
     })),
   })
+  const movieDetails = useQueries({
+    queries: (movies ?? []).map((m) => ({
+      queryKey: ['title', 'movie', m.tmdb_id],
+      queryFn: () => getTitle('movie', m.tmdb_id),
+    })),
+  })
 
   if (!session) {
-    return <Empty title="Upcoming" message="Sign in to see upcoming episodes." />
+    return <Empty title="Upcoming" message="Sign in to see upcoming episodes and releases." />
   }
 
   const showById = new Map((shows ?? []).map((s) => [s.tmdb_id, s]))
+  const movieById = new Map((movies ?? []).map((m) => [m.tmdb_id, m]))
   const today = new Date().toISOString().slice(0, 10)
 
-  const upcoming: Upcoming[] = details
+  const upcomingTv: Upcoming[] = tvDetails
     .map((d) => d.data)
     .filter((d): d is NonNullable<typeof d> => Boolean(d?.nextEpisodeToAir?.airDate))
     .map((d) => {
       const next = d.nextEpisodeToAir!
       const s = showById.get(d.id)
       return {
+        key: `tv-${d.id}-${next.seasonNumber}-${next.episodeNumber}`,
+        mediaType: 'tv' as const,
         tmdbId: d.id,
         name: s?.name ?? d.title,
         posterPath: s?.poster_path ?? d.posterPath,
-        season: next.seasonNumber,
-        episode: next.episodeNumber,
-        epName: next.name,
-        airDate: next.airDate!,
+        date: next.airDate!,
+        subtitle: `S${next.seasonNumber} · E${next.episodeNumber}${next.name ? ` — ${next.name}` : ''}`,
       }
     })
-    .filter((u) => u.airDate >= today)
-    .sort((a, b) => a.airDate.localeCompare(b.airDate))
 
-  const loading = details.some((d) => d.isLoading)
+  const upcomingMovies: Upcoming[] = movieDetails
+    .map((d) => d.data)
+    .filter((d): d is NonNullable<typeof d> => Boolean(d?.releaseDate))
+    .map((d) => {
+      const m = movieById.get(d.id)
+      return {
+        key: `movie-${d.id}`,
+        mediaType: 'movie' as const,
+        tmdbId: d.id,
+        name: m?.name ?? d.title,
+        posterPath: m?.poster_path ?? d.posterPath,
+        date: d.releaseDate!,
+        subtitle: '🎬 Movie release',
+      }
+    })
 
-  // Group by air date.
+  const upcoming = [...upcomingTv, ...upcomingMovies]
+    .filter((u) => u.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  const loading = tvDetails.some((d) => d.isLoading) || movieDetails.some((d) => d.isLoading)
+
+  // Group by date.
   const groups = new Map<string, Upcoming[]>()
   for (const u of upcoming) {
-    if (!groups.has(u.airDate)) groups.set(u.airDate, [])
-    groups.get(u.airDate)!.push(u)
+    if (!groups.has(u.date)) groups.set(u.date, [])
+    groups.get(u.date)!.push(u)
   }
 
   return (
     <div className="px-5 pt-14">
       <header className="mb-6">
-        <p className="text-sm text-muted">Airing soon</p>
+        <p className="text-sm text-muted">Airing & releasing soon</p>
         <h1 className="text-3xl font-bold tracking-tight">Upcoming</h1>
       </header>
 
@@ -95,7 +126,7 @@ export function Calendar() {
       {!loading && upcoming.length === 0 && (
         <Empty
           title=""
-          message="No upcoming episodes for the shows you follow. Add more shows to your watchlist."
+          message="Nothing upcoming for the shows and movies you follow. Add more to your watchlist."
         />
       )}
 
@@ -106,17 +137,14 @@ export function Calendar() {
             <div className="space-y-2">
               {items.map((u) => (
                 <Link
-                  key={`${u.tmdbId}-${u.season}-${u.episode}`}
-                  to={`/title/tv/${u.tmdbId}`}
+                  key={u.key}
+                  to={`/title/${u.mediaType}/${u.tmdbId}`}
                   className="flex items-center gap-3 rounded-2xl border border-line bg-surface/60 p-2.5 active:scale-[0.99]"
                 >
                   <Poster path={u.posterPath} alt={u.name ?? ''} size="w200" className="h-16 w-11" rounded="rounded-lg" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{u.name}</p>
-                    <p className="truncate text-xs text-muted">
-                      S{u.season} · E{u.episode}
-                      {u.epName ? ` — ${u.epName}` : ''}
-                    </p>
+                    <p className="truncate text-xs text-muted">{u.subtitle}</p>
                   </div>
                 </Link>
               ))}

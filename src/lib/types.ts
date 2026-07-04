@@ -66,6 +66,7 @@ export interface TitleDetail {
   posterPath: string | null
   backdropPath: string | null
   year: string | null
+  releaseDate: string | null // full ISO date; used for upcoming-movie calendar
   genres: string[]
   voteAverage: number
   runtime: number | null // minutes (movies)

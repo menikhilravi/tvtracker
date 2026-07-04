@@ -194,6 +194,7 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     posterPath: data.poster_path ?? null,
     backdropPath: data.backdrop_path ?? null,
     year: year(data.release_date ?? data.first_air_date),
+    releaseDate: data.release_date ?? null,
     genres: (data.genres ?? []).map((g) => g.name),
     voteAverage: data.vote_average ?? 0,
     runtime: data.runtime ?? null,
