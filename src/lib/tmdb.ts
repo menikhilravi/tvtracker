@@ -90,6 +90,7 @@ interface RawDetail {
   }
   last_episode_to_air?: RawEpisodeRef | null
   next_episode_to_air?: RawEpisodeRef | null
+  status?: string
 }
 
 interface RawEpisodeRef {
@@ -141,6 +142,9 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     })),
     lastEpisodeToAir: episodeRef(data.last_episode_to_air),
     nextEpisodeToAir: episodeRef(data.next_episode_to_air),
+    // TMDB's production status ('Ended' / 'Canceled' / 'Returning Series' / …).
+    showStatus: data.status ?? null,
+    ended: mediaType === 'tv' && (data.status === 'Ended' || data.status === 'Canceled'),
   }
 }
 

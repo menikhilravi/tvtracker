@@ -361,8 +361,8 @@ export function computeNextUp(
 // Viewing categories used by the profile library filters.
 //  - not_started: on the watchlist, nothing watched yet
 //  - watching:    started, still behind on aired episodes
-//  - up_to_date:  caught up on every aired episode (show hasn't ended / more to come)
-//  - finished:    marked completed
+//  - up_to_date:  caught up on every aired episode of an ongoing show
+//  - finished:    marked completed, or caught up on an ended/canceled show
 //  - stopped:     dropped
 export type LibraryCategory = 'watching' | 'not_started' | 'up_to_date' | 'finished' | 'stopped'
 
@@ -382,7 +382,9 @@ function categorize(
   if (f.media_type === 'movie') return 'watching'
   const detail = detailById.get(f.tmdb_id)
   if (!detail) return 'watching' // detail still loading — treat as watching for now
-  return computeNextUp(detail, epMap.get(f.tmdb_id) ?? new Set()) ? 'watching' : 'up_to_date'
+  if (computeNextUp(detail, epMap.get(f.tmdb_id) ?? new Set())) return 'watching' // still behind
+  // Caught up on every aired episode: an ended show is finished, an ongoing one is up to date.
+  return detail.ended ? 'finished' : 'up_to_date'
 }
 
 export function useLibrary() {

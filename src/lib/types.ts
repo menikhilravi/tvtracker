@@ -50,4 +50,8 @@ export interface TitleDetail {
   // tv only: the most recently aired and next scheduled episodes (from TMDB).
   lastEpisodeToAir: EpisodeRef | null
   nextEpisodeToAir: EpisodeRef | null
+  // tv only: TMDB production status ('Ended' / 'Canceled' / 'Returning Series').
+  showStatus: string | null
+  // True for a TV show TMDB reports as Ended or Canceled.
+  ended: boolean
 }
