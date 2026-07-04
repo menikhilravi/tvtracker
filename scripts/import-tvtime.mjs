@@ -156,7 +156,10 @@ const idMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8
 const authHeaders = { apikey: ANON_KEY, authorization: `Bearer ${ANON_KEY}` }
 
 async function resolveShow(tvdbId) {
-  if (idMap[tvdbId] !== undefined) return idMap[tvdbId]
+  // A cached entry is reusable only if it's a "not found" (null) or already has
+  // the current shape (with `seasons`). Older-format entries are re-resolved.
+  const cached = idMap[tvdbId]
+  if (cached !== undefined && (cached === null || cached.seasons !== undefined)) return cached
   try {
     const find = await (
       await fetch(`${PROXY_URL}/find/${tvdbId}?external_source=tvdb_id`, { headers: authHeaders })
@@ -204,7 +207,7 @@ async function pool(items, size, fn) {
 
 function firstNEpisodes(seasons, n) {
   const out = []
-  for (const [season, count] of seasons) {
+  for (const [season, count] of seasons ?? []) {
     for (let e = 1; e <= count && out.length < n; e++) out.push([season, e])
     if (out.length >= n) break
   }
