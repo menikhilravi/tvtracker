@@ -63,7 +63,7 @@ export function TitleDetail() {
         </button>
       </div>
 
-      <div className="-mt-24 px-5">
+      <div className="relative z-10 -mt-24 px-5">
         <div className="flex gap-4">
           <Poster
             path={title.posterPath}
