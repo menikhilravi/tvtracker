@@ -23,6 +23,13 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^tv\/\d+$/, params: ['append_to_response'] },
   { pattern: /^tv\/\d+\/season\/\d+$/, params: [] },
   { pattern: /^trending\/(all|movie|tv)\/(day|week)$/, params: ['page'] },
+  // Discovery: popular / top-rated shelves and per-title recommendations.
+  { pattern: /^(movie|tv)\/popular$/, params: ['page'] },
+  { pattern: /^(movie|tv)\/top_rated$/, params: ['page'] },
+  { pattern: /^(movie|tv)\/\d+\/recommendations$/, params: ['page'] },
+  // Genre browsing: the genre list, then discover filtered by genre.
+  { pattern: /^genre\/(movie|tv)\/list$/, params: [] },
+  { pattern: /^discover\/(movie|tv)$/, params: ['with_genres', 'sort_by', 'page', 'include_adult'] },
   // Convert an external id (e.g. TheTVDB) to a TMDB id — used by the importer.
   { pattern: /^find\/[^/]+$/, params: ['external_source'] },
 ]

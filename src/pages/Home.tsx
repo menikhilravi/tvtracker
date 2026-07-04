@@ -1,8 +1,12 @@
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
 import { UpNextRail } from '../components/UpNext'
 import { Logo } from '../components/Logo'
+import { PosterRail, trackedKey } from '../components/PosterRail'
+import { getRecommendations } from '../lib/tmdb'
 import { useFollows, type FollowRow } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
 
@@ -144,8 +148,43 @@ export function Home() {
           <EmptyWatchlist tab={tab} hasAnything={Boolean(follows && follows.length > 0)} />
         )}
       </section>
+
+      <RecommendedRail follows={follows ?? []} tab={tab} />
     </div>
   )
+}
+
+// "Because you watched {X}" — recommendations seeded from a title the user has
+// engaged with most recently (prefer completed, then watching) in the active
+// media tab. Already-tracked titles are filtered out so it only surfaces new
+// things to watch.
+function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab }) {
+  const seed = useMemo(() => {
+    const candidates = follows
+      .filter((f) => f.media_type === tab && f.poster_path)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    return (
+      candidates.find((f) => f.status === 'completed') ??
+      candidates.find((f) => f.status === 'watching') ??
+      null
+    )
+  }, [follows, tab])
+
+  const tracked = useMemo(
+    () => new Set(follows.map((f) => trackedKey(f.media_type, f.tmdb_id))),
+    [follows],
+  )
+
+  const { data } = useQuery({
+    queryKey: ['recommendations', seed?.media_type, seed?.tmdb_id],
+    queryFn: () => getRecommendations(seed!.media_type, seed!.tmdb_id),
+    enabled: Boolean(seed),
+  })
+
+  if (!seed) return null
+  const items = (data ?? []).filter((r) => !tracked.has(trackedKey(r.media_type, r.id)))
+
+  return <PosterRail title={`Because you watched ${seed.name}`} items={items} />
 }
 
 function EmptyWatchlist({ tab, hasAnything }: { tab: MediaTab; hasAnything: boolean }) {

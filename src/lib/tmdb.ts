@@ -37,7 +37,10 @@ const year = (date?: string | null) => (date ? date.slice(0, 4) : null)
 
 interface RawMultiItem {
   id: number
-  media_type: string
+  // Multi-type endpoints (search/multi, trending/all) tag each row; single-type
+  // endpoints (popular, top_rated, recommendations, discover) do not — hence
+  // the `fallbackType` in `toResults`.
+  media_type?: string
   title?: string
   name?: string
   poster_path?: string | null
@@ -46,22 +49,29 @@ interface RawMultiItem {
   overview?: string
 }
 
+// Normalize raw TMDB list rows into SearchResult[]. `fallbackType` supplies the
+// media type for single-type endpoints whose rows omit `media_type`.
+function toResults(items: RawMultiItem[], fallbackType?: MediaType): SearchResult[] {
+  return items
+    .map((r) => ({ r, type: (r.media_type ?? fallbackType) as MediaType | undefined }))
+    .filter(({ type }) => type === 'movie' || type === 'tv')
+    .map(({ r, type }) => ({
+      id: r.id,
+      media_type: type as MediaType,
+      title: r.title ?? r.name ?? 'Untitled',
+      posterPath: r.poster_path ?? null,
+      year: year(r.release_date ?? r.first_air_date),
+      overview: r.overview ?? '',
+    }))
+}
+
 export async function searchMulti(query: string): Promise<SearchResult[]> {
   if (!query.trim()) return []
   const data = await proxy<{ results: RawMultiItem[] }>('search/multi', {
     query,
     include_adult: 'false',
   })
-  return data.results
-    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
-    .map((r) => ({
-      id: r.id,
-      media_type: r.media_type as MediaType,
-      title: r.title ?? r.name ?? 'Untitled',
-      posterPath: r.poster_path ?? null,
-      year: year(r.release_date ?? r.first_air_date),
-      overview: r.overview ?? '',
-    }))
+  return toResults(data.results)
 }
 
 // --- Detail -----------------------------------------------------------------
@@ -177,14 +187,48 @@ export async function getSeason(showId: number, seasonNumber: number): Promise<E
 
 export async function getTrending(window: 'day' | 'week' = 'week'): Promise<SearchResult[]> {
   const data = await proxy<{ results: RawMultiItem[] }>(`trending/all/${window}`)
-  return data.results
-    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
-    .map((r) => ({
-      id: r.id,
-      media_type: r.media_type as MediaType,
-      title: r.title ?? r.name ?? 'Untitled',
-      posterPath: r.poster_path ?? null,
-      year: year(r.release_date ?? r.first_air_date),
-      overview: r.overview ?? '',
-    }))
+  return toResults(data.results)
+}
+
+export async function getPopular(mediaType: MediaType): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`${mediaType}/popular`)
+  return toResults(data.results, mediaType)
+}
+
+export async function getTopRated(mediaType: MediaType): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`${mediaType}/top_rated`)
+  return toResults(data.results, mediaType)
+}
+
+// Titles similar to one the user already likes ("Because you watched …").
+export async function getRecommendations(
+  mediaType: MediaType,
+  id: number,
+): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`${mediaType}/${id}/recommendations`)
+  return toResults(data.results, mediaType)
+}
+
+// --- Genre browsing ---------------------------------------------------------
+
+export interface Genre {
+  id: number
+  name: string
+}
+
+export async function getGenres(mediaType: MediaType): Promise<Genre[]> {
+  const data = await proxy<{ genres: Genre[] }>(`genre/${mediaType}/list`)
+  return data.genres ?? []
+}
+
+export async function discoverByGenre(
+  mediaType: MediaType,
+  genreId: number,
+): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`discover/${mediaType}`, {
+    with_genres: String(genreId),
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+  })
+  return toResults(data.results, mediaType)
 }
