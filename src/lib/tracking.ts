@@ -25,6 +25,35 @@ async function cacheTitle(t: Pick<TitleDetail, 'id' | 'media_type' | 'title' | '
   )
 }
 
+// Logging a watch should start tracking a title as "watching". This promotes
+// only from watchlist or untracked — it never overrides completed/dropped, and
+// leaves an already-watching show alone. Returns true if the status changed.
+async function promoteToWatching(
+  show: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath'>,
+): Promise<boolean> {
+  if (!supabase) return false
+  const { data } = await supabase
+    .from('follows')
+    .select('status')
+    .eq('tmdb_id', show.id)
+    .eq('media_type', show.media_type)
+    .maybeSingle()
+  const status = data?.status ?? null
+  if (status !== null && status !== 'watchlist') return false
+  await supabase.from('follows').upsert(
+    {
+      tmdb_id: show.id,
+      media_type: show.media_type,
+      status: 'watching',
+      name: show.title,
+      poster_path: show.posterPath,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,tmdb_id,media_type' },
+  )
+  return true
+}
+
 export type FollowStatus = 'watchlist' | 'watching' | 'completed' | 'dropped'
 
 export function useFollow(
@@ -151,6 +180,8 @@ export function useToggleEpisode(show: TitleDetail) {
           season_number: args.season,
           episode_number: args.episode,
         })
+        // First watch of a not-started show → move it to "watching".
+        await promoteToWatching(show)
       }
     },
     onSuccess: () => {
@@ -159,6 +190,8 @@ export function useToggleEpisode(show: TitleDetail) {
       qc.invalidateQueries({ queryKey: ['history'] })
       qc.invalidateQueries({ queryKey: ['up-next'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['follow', show.id, show.media_type] })
     },
   })
 }
@@ -188,6 +221,7 @@ export function useToggleSeason(show: TitleDetail) {
         await supabase
           .from('episode_watches')
           .upsert(rows, { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' })
+        await promoteToWatching(show)
       }
     },
     onSuccess: () => {
@@ -195,6 +229,8 @@ export function useToggleSeason(show: TitleDetail) {
       qc.invalidateQueries({ queryKey: ['history'] })
       qc.invalidateQueries({ queryKey: ['up-next'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['follow', show.id, show.media_type] })
     },
   })
 }

@@ -34,6 +34,23 @@ export interface EpisodeRef {
   airDate: string | null
 }
 
+// A single streaming/rent/buy provider for a title in one region (from TMDB's
+// watch-provider data, sourced from JustWatch).
+export interface WatchProvider {
+  id: number
+  name: string
+  logoPath: string | null
+}
+
+export interface RegionProviders {
+  link: string | null // JustWatch deep link for this title + region
+  flatrate: WatchProvider[] // included with a subscription
+  free: WatchProvider[]
+  ads: WatchProvider[] // free with ads
+  rent: WatchProvider[]
+  buy: WatchProvider[]
+}
+
 export interface TitleDetail {
   id: number
   media_type: MediaType
@@ -54,4 +71,6 @@ export interface TitleDetail {
   showStatus: string | null
   // True for a TV show TMDB reports as Ended or Canceled.
   ended: boolean
+  // Streaming/rent/buy availability, keyed by region code (e.g. 'US', 'GB').
+  watchProviders: Record<string, RegionProviders>
 }

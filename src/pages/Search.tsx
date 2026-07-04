@@ -4,10 +4,13 @@ import { Link } from 'react-router-dom'
 import { searchMulti } from '../lib/tmdb'
 import { Poster } from '../components/Poster'
 import { DiscoverRails } from '../components/DiscoverRails'
+import { ProviderBadge } from '../components/ProviderBadge'
+import { useWatchRegion } from '../lib/region'
 
 export function Search() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [region] = useWatchRegion()
 
   // Debounce typing so we don't hit the proxy on every keystroke.
   useEffect(() => {
@@ -78,7 +81,10 @@ export function Search() {
                       {r.media_type === 'tv' ? 'TV' : 'Film'}
                     </span>
                   </div>
-                  <div className="text-xs text-faint">{r.year ?? '—'}</div>
+                  <div className="flex items-center gap-2 text-xs text-faint">
+                    <span>{r.year ?? '—'}</span>
+                    <ProviderBadge mediaType={r.media_type} id={r.id} region={region} />
+                  </div>
                   <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{r.overview}</p>
                 </div>
               </Link>

@@ -2,7 +2,16 @@
 // directly — the key stays on the server). All functions return normalized
 // shapes from `types.ts` so components never touch raw TMDB JSON.
 
-import type { Episode, EpisodeRef, MediaType, SearchResult, Season, TitleDetail } from './types'
+import type {
+  Episode,
+  EpisodeRef,
+  MediaType,
+  RegionProviders,
+  SearchResult,
+  Season,
+  TitleDetail,
+  WatchProvider,
+} from './types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -101,6 +110,23 @@ interface RawDetail {
   last_episode_to_air?: RawEpisodeRef | null
   next_episode_to_air?: RawEpisodeRef | null
   status?: string
+  'watch/providers'?: { results?: Record<string, RawRegionProviders> }
+}
+
+interface RawProvider {
+  provider_id: number
+  provider_name: string
+  logo_path?: string | null
+  display_priority?: number
+}
+
+interface RawRegionProviders {
+  link?: string | null
+  flatrate?: RawProvider[]
+  free?: RawProvider[]
+  ads?: RawProvider[]
+  rent?: RawProvider[]
+  buy?: RawProvider[]
 }
 
 interface RawEpisodeRef {
@@ -120,9 +146,34 @@ const episodeRef = (e?: RawEpisodeRef | null): EpisodeRef | null =>
       }
     : null
 
+// TMDB returns providers per category (flatrate/rent/buy/…). Normalize one
+// region's block, sorting each category by TMDB's display_priority.
+const providers = (list?: RawProvider[]): WatchProvider[] =>
+  (list ?? [])
+    .slice()
+    .sort((a, b) => (a.display_priority ?? 99) - (b.display_priority ?? 99))
+    .map((p) => ({ id: p.provider_id, name: p.provider_name, logoPath: p.logo_path ?? null }))
+
+function normalizeProviders(
+  raw?: Record<string, RawRegionProviders>,
+): Record<string, RegionProviders> {
+  const out: Record<string, RegionProviders> = {}
+  for (const [region, r] of Object.entries(raw ?? {})) {
+    out[region] = {
+      link: r.link ?? null,
+      flatrate: providers(r.flatrate),
+      free: providers(r.free),
+      ads: providers(r.ads),
+      rent: providers(r.rent),
+      buy: providers(r.buy),
+    }
+  }
+  return out
+}
+
 export async function getTitle(mediaType: MediaType, id: number): Promise<TitleDetail> {
   const data = await proxy<RawDetail>(`${mediaType}/${id}`, {
-    append_to_response: 'credits',
+    append_to_response: 'credits,watch/providers',
   })
   const seasons: Season[] = (data.seasons ?? [])
     .filter((s) => s.season_number > 0) // hide "Specials" (season 0) by default
@@ -155,6 +206,7 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     // TMDB's production status ('Ended' / 'Canceled' / 'Returning Series' / …).
     showStatus: data.status ?? null,
     ended: mediaType === 'tv' && (data.status === 'Ended' || data.status === 'Canceled'),
+    watchProviders: normalizeProviders(data['watch/providers']?.results),
   }
 }
 

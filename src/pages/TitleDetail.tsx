@@ -6,6 +6,8 @@ import type { MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { RatingStars } from '../components/RatingStars'
 import { useAuth } from '../lib/auth'
+import { useWatchRegion } from '../lib/region'
+import type { WatchProvider } from '../lib/types'
 import {
   useFollow,
   useMarkMovieWatched,
@@ -108,6 +110,8 @@ export function TitleDetail() {
           <p className="mt-5 text-sm leading-relaxed text-ink/80">{title.overview}</p>
         )}
 
+        <WhereToWatch title={title} />
+
         {title.media_type === 'tv' && <Seasons show={title} />}
 
         {title.cast.length > 0 && (
@@ -141,6 +145,117 @@ function Dot({ text }: { text: string }) {
       <span className="h-1 w-1 rounded-full bg-faint" />
       {text}
     </span>
+  )
+}
+
+const REGION_NAME = (() => {
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' })
+    return (code: string) => dn.of(code) ?? code
+  } catch {
+    return (code: string) => code
+  }
+})()
+
+// "Where to watch" — TMDB/JustWatch streaming availability for the selected
+// region. Region defaults to the browser locale and is switchable + persisted,
+// since availability is region-specific.
+function WhereToWatch({ title }: { title: TitleDetailType }) {
+  const [region, setRegion] = useWatchRegion()
+
+  // Regions TMDB actually has data for, plus the current one so it's selectable
+  // even when this title isn't available there.
+  const regions = Object.keys(title.watchProviders)
+  if (regions.length === 0) return null // no provider data for this title at all
+
+  const options = [...new Set([region, ...regions])].sort((a, b) =>
+    REGION_NAME(a).localeCompare(REGION_NAME(b)),
+  )
+  const data = title.watchProviders[region]
+
+  // Ways to watch without paying per-title, deduped by provider id.
+  const streamMap = new Map<number, WatchProvider>()
+  for (const p of [...(data?.flatrate ?? []), ...(data?.free ?? []), ...(data?.ads ?? [])]) {
+    if (!streamMap.has(p.id)) streamMap.set(p.id, p)
+  }
+  const stream = [...streamMap.values()]
+
+  const rentBuyMap = new Map<number, WatchProvider>()
+  for (const p of [...(data?.rent ?? []), ...(data?.buy ?? [])]) {
+    if (!rentBuyMap.has(p.id)) rentBuyMap.set(p.id, p)
+  }
+  const rentBuy = [...rentBuyMap.values()]
+
+  return (
+    <section className="mt-7">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold tracking-wide text-muted">Where to watch</h2>
+        <select
+          value={region}
+          onChange={(e) => setRegion(e.target.value)}
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+          aria-label="Region"
+        >
+          {options.map((code) => (
+            <option key={code} value={code}>
+              {REGION_NAME(code)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {stream.length === 0 && rentBuy.length === 0 ? (
+        <p className="rounded-2xl border border-line bg-surface/60 p-4 text-sm text-muted">
+          Not available to stream in {REGION_NAME(region)}.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {stream.length > 0 && (
+            <ProviderRow label="Stream" providers={stream} link={data?.link ?? null} />
+          )}
+          {rentBuy.length > 0 && (
+            <ProviderRow label="Rent or buy" providers={rentBuy} link={data?.link ?? null} />
+          )}
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] text-faint">Availability data powered by JustWatch</p>
+    </section>
+  )
+}
+
+function ProviderRow({
+  label,
+  providers,
+  link,
+}: {
+  label: string
+  providers: WatchProvider[]
+  link: string | null
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium text-faint">{label}</div>
+      <div className="flex flex-wrap gap-2.5">
+        {providers.map((p) => {
+          const logo = IMG(p.logoPath, 'w200')
+          const inner = logo ? (
+            <img src={logo} alt={p.name} title={p.name} className="h-11 w-11 rounded-xl ring-1 ring-line" />
+          ) : (
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-surface-2 px-1 text-center text-[9px] font-medium ring-1 ring-line">
+              {p.name}
+            </span>
+          )
+          return link ? (
+            <a key={p.id} href={link} target="_blank" rel="noopener noreferrer" className="active:scale-95">
+              {inner}
+            </a>
+          ) : (
+            <div key={p.id}>{inner}</div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
