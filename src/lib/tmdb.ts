@@ -57,6 +57,7 @@ interface RawMultiItem {
   release_date?: string
   first_air_date?: string
   overview?: string
+  genre_ids?: number[]
 }
 
 // Normalize raw TMDB list rows into SearchResult[]. `fallbackType` supplies the
@@ -72,6 +73,7 @@ function toResults(items: RawMultiItem[], fallbackType?: MediaType): SearchResul
       posterPath: r.poster_path ?? null,
       year: year(r.release_date ?? r.first_air_date),
       overview: r.overview ?? '',
+      genreIds: r.genre_ids ?? [],
     }))
 }
 

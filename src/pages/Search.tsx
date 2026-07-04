@@ -1,16 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { searchMulti } from '../lib/tmdb'
+import { searchMulti, getGenres } from '../lib/tmdb'
+import type { MediaType, SearchResult } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { DiscoverRails } from '../components/DiscoverRails'
 import { ProviderBadge } from '../components/ProviderBadge'
 import { useWatchRegion } from '../lib/region'
 
+type TypeFilter = 'all' | MediaType
+
+const decadeOf = (year: string | null) =>
+  year ? String(Math.floor(Number(year) / 10) * 10) : null
+
 export function Search() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [region] = useWatchRegion()
+
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [genre, setGenre] = useState('')
+  const [decade, setDecade] = useState('')
 
   // Debounce typing so we don't hit the proxy on every keystroke.
   useEffect(() => {
@@ -23,6 +33,54 @@ export function Search() {
     queryFn: () => searchMulti(query),
     enabled: query.length > 1,
   })
+
+  // Genre id → name across both namespaces (movie & tv ids differ), so a mixed
+  // result list can be labeled and filtered by genre. Cached with discovery.
+  const { data: movieGenres } = useQuery({ queryKey: ['genres', 'movie'], queryFn: () => getGenres('movie') })
+  const { data: tvGenres } = useQuery({ queryKey: ['genres', 'tv'], queryFn: () => getGenres('tv') })
+  const genreById = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const g of [...(movieGenres ?? []), ...(tvGenres ?? [])]) m.set(g.id, g.name)
+    return m
+  }, [movieGenres, tvGenres])
+
+  const results = useMemo(() => data ?? [], [data])
+  const genresOf = useMemo(
+    () => (r: SearchResult) =>
+      r.genreIds.map((id) => genreById.get(id)).filter((n): n is string => Boolean(n)),
+    [genreById],
+  )
+
+  // Filter options derived from the current results, so we only offer choices
+  // that actually narrow something.
+  const availableGenres = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of results) for (const n of genresOf(r)) s.add(n)
+    return [...s].sort()
+  }, [results, genresOf])
+  const availableDecades = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of results) {
+      const d = decadeOf(r.year)
+      if (d) s.add(d)
+    }
+    return [...s].sort((a, b) => Number(b) - Number(a))
+  }, [results])
+
+  // A selected value that's no longer offered acts as "Any".
+  const activeGenre = availableGenres.includes(genre) ? genre : ''
+  const activeDecade = availableDecades.includes(decade) ? decade : ''
+
+  const filtered = useMemo(
+    () =>
+      results.filter((r) => {
+        if (typeFilter !== 'all' && r.media_type !== typeFilter) return false
+        if (activeGenre && !genresOf(r).includes(activeGenre)) return false
+        if (activeDecade && decadeOf(r.year) !== activeDecade) return false
+        return true
+      }),
+    [results, typeFilter, activeGenre, activeDecade, genresOf],
+  )
 
   return (
     <div className="min-h-dvh">
@@ -66,8 +124,75 @@ export function Search() {
 
         {isFetching && <p className="text-sm text-muted">Searching…</p>}
 
+        {results.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 rounded-xl border border-line bg-surface/60 p-0.5 text-xs font-semibold">
+              {(
+                [
+                  { key: 'all', label: 'All' },
+                  { key: 'tv', label: 'TV' },
+                  { key: 'movie', label: 'Film' },
+                ] as { key: TypeFilter; label: string }[]
+              ).map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTypeFilter(t.key)}
+                  className={`rounded-lg px-2.5 py-1 transition ${
+                    typeFilter === t.key ? 'bg-brand-gradient text-white' : 'text-muted'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {availableGenres.length > 0 && (
+              <select
+                value={activeGenre}
+                onChange={(e) => setGenre(e.target.value)}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+              >
+                <option value="">Any genre</option>
+                {availableGenres.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {availableDecades.length > 0 && (
+              <select
+                value={activeDecade}
+                onChange={(e) => setDecade(e.target.value)}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+              >
+                <option value="">Any year</option>
+                {availableDecades.map((d) => (
+                  <option key={d} value={d}>
+                    {d}s
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {(typeFilter !== 'all' || activeGenre || activeDecade) && (
+              <button
+                onClick={() => {
+                  setTypeFilter('all')
+                  setGenre('')
+                  setDecade('')
+                }}
+                className="text-xs text-brand active:opacity-70"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+
         <ul className="space-y-2">
-          {data?.map((r) => (
+          {filtered.map((r) => (
             <li key={`${r.media_type}-${r.id}`}>
               <Link
                 to={`/title/${r.media_type}/${r.id}`}
@@ -98,8 +223,14 @@ export function Search() {
           </div>
         )}
 
-        {query.length > 1 && !isFetching && data?.length === 0 && (
+        {query.length > 1 && !isFetching && results.length === 0 && (
           <p className="mt-8 text-center text-sm text-muted">No results for “{query}”.</p>
+        )}
+
+        {query.length > 1 && !isFetching && results.length > 0 && filtered.length === 0 && (
+          <p className="mt-8 text-center text-sm text-muted">
+            No results match those filters.
+          </p>
         )}
       </div>
     </div>

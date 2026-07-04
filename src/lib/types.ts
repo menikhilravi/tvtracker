@@ -7,6 +7,7 @@ export interface SearchResult {
   posterPath: string | null
   year: string | null
   overview: string
+  genreIds: number[]
 }
 
 export interface Season {
