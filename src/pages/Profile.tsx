@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
 import {
+  useAllRatings,
   useLibrary,
   useRemoveFollow,
   useStats,
+  ratingKey,
   type LibraryCategory,
   type LibraryItem,
 } from '../lib/tracking'
@@ -174,7 +176,7 @@ function StatsSection() {
 // --- Library ----------------------------------------------------------------
 
 type Filter = 'all' | LibraryCategory
-type SortKey = 'recent' | 'title'
+type SortKey = 'recent' | 'title' | 'rating'
 type MediaKind = 'tv' | 'movie'
 
 const CATEGORY_ORDER: LibraryCategory[] = [
@@ -196,6 +198,7 @@ const CATEGORY_LABEL: Record<LibraryCategory, string> = {
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'recent', label: 'Recently updated' },
   { key: 'title', label: 'Title (A–Z)' },
+  { key: 'rating', label: 'Your rating' },
 ]
 
 function countsFor(items: LibraryItem[]): Record<LibraryCategory, number> {
@@ -212,6 +215,7 @@ function countsFor(items: LibraryItem[]): Record<LibraryCategory, number> {
 
 function LibrarySection() {
   const { items, isLoading, refining } = useLibrary()
+  const { data: ratings } = useAllRatings()
   const [open, setOpen] = usePersistedState<MediaKind | null>('lib:open', null)
 
   const tv = items.filter((i) => i.media_type === 'tv')
@@ -242,6 +246,7 @@ function LibrarySection() {
           title={open === 'tv' ? 'TV Shows' : 'Movies'}
           icon={open === 'tv' ? '📺' : '🎬'}
           items={openItems}
+          ratings={ratings}
           onClose={() => setOpen(null)}
         />
       )}
@@ -287,23 +292,37 @@ function LibraryCard({
   )
 }
 
+// Your score, shown top-left on a library poster (nothing if unrated).
+function ScoreBadge({ score }: { score: number | undefined }) {
+  if (score === undefined) return null
+  return (
+    <span className="absolute left-1.5 top-1.5 rounded-md bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold text-black shadow">
+      ★ {score}
+    </span>
+  )
+}
+
 function LibraryModal({
   storageKey,
   title,
   icon,
   items,
+  ratings,
   onClose,
 }: {
   storageKey: MediaKind
   title: string
   icon: string
   items: LibraryItem[]
+  ratings: Map<string, number> | undefined
   onClose: () => void
 }) {
   // Filter / sort / search persist per media kind so back-navigation restores them.
   const [filter, setFilter] = usePersistedState<Filter>(`lib:${storageKey}:filter`, 'all')
   const [sort, setSort] = usePersistedState<SortKey>(`lib:${storageKey}:sort`, 'recent')
   const [search, setSearch] = usePersistedState<string>(`lib:${storageKey}:search`, '')
+  const [ratedOnly, setRatedOnly] = usePersistedState<boolean>(`lib:${storageKey}:ratedOnly`, false)
+  const scoreOf = (it: LibraryItem) => ratings?.get(ratingKey(it.media_type, it.tmdb_id))
   const [editing, setEditing] = useState(false)
   const remove = useRemoveFollow()
   const scrollRef = useScrollMemory<HTMLDivElement>(`lib:${storageKey}:scroll`)
@@ -321,7 +340,12 @@ function LibraryModal({
   }, [onClose])
 
   const q = search.trim().toLowerCase()
-  const base = items.filter((it) => !q || (it.name ?? '').toLowerCase().includes(q))
+  const base = items.filter(
+    (it) =>
+      (!q || (it.name ?? '').toLowerCase().includes(q)) &&
+      (!ratedOnly || scoreOf(it) !== undefined),
+  )
+  const ratedCount = items.filter((it) => scoreOf(it) !== undefined).length
   const counts = countsFor(base)
   const filters: Filter[] = ['all', ...CATEGORY_ORDER.filter((c) => counts[c] > 0)]
   const active: Filter = filters.includes(filter) ? filter : 'all'
@@ -329,11 +353,16 @@ function LibraryModal({
   const shown = useMemo(() => {
     const list = base.filter((it) => active === 'all' || it.category === active)
     const byName = (a: LibraryItem, b: LibraryItem) => (a.name ?? '').localeCompare(b.name ?? '')
-    return sort === 'title'
-      ? [...list].sort(byName)
-      : [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    if (sort === 'title') return [...list].sort(byName)
+    if (sort === 'rating') {
+      // Highest score first; unrated fall to the bottom, then A–Z within a tie.
+      return [...list].sort(
+        (a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || byName(a, b),
+      )
+    }
+    return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, active, sort])
+  }, [base, active, sort, ratings])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">
@@ -391,6 +420,18 @@ function LibraryModal({
               </span>
             </button>
           ))}
+          {ratedCount > 0 && (
+            <button
+              onClick={() => setRatedOnly(!ratedOnly)}
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition active:scale-[0.97] ${
+                ratedOnly
+                  ? 'border-transparent bg-amber-400 text-black shadow-md'
+                  : 'border-line bg-surface/60 text-muted'
+              }`}
+            >
+              ★ Rated <span className={ratedOnly ? 'text-black/60' : 'text-faint'}>{ratedCount}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -428,6 +469,7 @@ function LibraryModal({
                     size="w342"
                     className="aspect-[2/3] w-full opacity-60 shadow-lg shadow-black/40"
                   />
+                  <ScoreBadge score={scoreOf(r)} />
                   <button
                     onClick={() => remove.mutate({ tmdbId: r.tmdb_id, mediaType: r.media_type })}
                     disabled={remove.isPending}
@@ -445,12 +487,15 @@ function LibraryModal({
                   to={`/title/${r.media_type}/${r.tmdb_id}`}
                   className="active:scale-[0.97]"
                 >
-                  <Poster
-                    path={r.poster_path}
-                    alt={r.name ?? ''}
-                    size="w342"
-                    className="aspect-[2/3] w-full shadow-lg shadow-black/40"
-                  />
+                  <div className="relative">
+                    <Poster
+                      path={r.poster_path}
+                      alt={r.name ?? ''}
+                      size="w342"
+                      className="aspect-[2/3] w-full shadow-lg shadow-black/40"
+                    />
+                    <ScoreBadge score={scoreOf(r)} />
+                  </div>
                   <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
                   <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
                 </Link>

@@ -280,10 +280,40 @@ export function useRating(title: Pick<TitleDetail, 'id' | 'media_type' | 'title'
         { onConflict: 'user_id,tmdb_id,media_type' },
       )
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rating', title.id, title.media_type] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rating', title.id, title.media_type] })
+      qc.invalidateQueries({ queryKey: ['ratings', 'all'] })
+    },
   })
 
   return { rating: query.data ?? null, isLoading: query.isLoading, save, enabled }
+}
+
+// The user's score for every rated title, keyed `${media_type}-${tmdb_id}`.
+// Used to sort/filter/badge the library by rating.
+export function ratingKey(mediaType: MediaType, tmdbId: number): string {
+  return `${mediaType}-${tmdbId}`
+}
+
+export function useAllRatings() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['ratings', 'all'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ tmdb_id: number; media_type: MediaType; score: number }>(
+        (from, to) =>
+          supabase!
+            .from('ratings')
+            .select('tmdb_id, media_type, score')
+            .order('id', { ascending: true })
+            .range(from, to),
+      )
+      const map = new Map<string, number>()
+      for (const r of rows) map.set(ratingKey(r.media_type, r.tmdb_id), r.score)
+      return map
+    },
+  })
 }
 
 // --- Stats ------------------------------------------------------------------
