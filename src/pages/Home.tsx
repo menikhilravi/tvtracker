@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
@@ -106,6 +106,8 @@ export function Home() {
         ))}
       </div>
 
+      <SurpriseMe items={watchlist} />
+
       {tab === 'tv' && <UpNextRail />}
 
       <section className="mb-7">
@@ -185,6 +187,73 @@ function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab
   const items = (data ?? []).filter((r) => !tracked.has(trackedKey(r.media_type, r.id)))
 
   return <PosterRail title={`Because you watched ${seed.name}`} items={items} />
+}
+
+// "What should I watch?" — picks a random title from the watchlist to beat
+// decision paralysis, with a reroll. Draws from what's passed in (the active
+// tab's watchlist), so it respects the TV/Movies toggle.
+function SurpriseMe({ items }: { items: FollowRow[] }) {
+  const [pick, setPick] = useState<FollowRow | null>(null)
+  if (items.length === 0) return null
+
+  const roll = () => {
+    // Avoid repeating the current pick when there's more than one option.
+    const pool = pick && items.length > 1 ? items.filter((i) => i.tmdb_id !== pick.tmdb_id) : items
+    setPick(pool[Math.floor(Math.random() * pool.length)])
+  }
+
+  return (
+    <>
+      <button
+        onClick={roll}
+        className="mb-6 w-full rounded-2xl border border-line bg-surface/60 py-3 text-sm font-semibold active:scale-[0.98]"
+      >
+        🎲 Surprise me
+      </button>
+
+      {pick && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
+          onClick={() => setPick(null)}
+        >
+          <div
+            className="w-full max-w-xs rounded-3xl border border-line bg-surface p-5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-xs font-medium tracking-wide text-muted">Tonight, watch…</p>
+            <Link
+              to={`/title/${pick.media_type}/${pick.tmdb_id}`}
+              onClick={() => setPick(null)}
+              className="mt-3 block active:scale-[0.98]"
+            >
+              <Poster
+                path={pick.poster_path}
+                alt={pick.name ?? ''}
+                size="w342"
+                className="mx-auto aspect-[2/3] w-36 shadow-2xl shadow-black/50"
+              />
+              <p className="mt-3 font-semibold text-balance">{pick.name}</p>
+            </Link>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={roll}
+                className="flex-1 rounded-xl border border-line bg-surface-2 py-2.5 text-sm font-semibold active:scale-95"
+              >
+                🎲 Reroll
+              </button>
+              <Link
+                to={`/title/${pick.media_type}/${pick.tmdb_id}`}
+                onClick={() => setPick(null)}
+                className="flex-1 rounded-xl bg-brand-gradient py-2.5 text-center text-sm font-semibold active:scale-95"
+              >
+                Open
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
 }
 
 function EmptyWatchlist({ tab, hasAnything }: { tab: MediaTab; hasAnything: boolean }) {

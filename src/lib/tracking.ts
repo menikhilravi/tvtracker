@@ -414,6 +414,28 @@ export function computeNextUp(
   return null
 }
 
+// Watched vs. total *aired* episodes for a show, for a progress bar. Mirrors
+// computeNextUp's iteration (only counts episodes up to the last aired one, so
+// an ongoing show can reach 100%).
+export function airedProgress(
+  detail: TitleDetail,
+  watched: Set<string>,
+): { done: number; total: number } {
+  const last = detail.lastEpisodeToAir
+  if (!last) return { done: 0, total: 0 }
+  const counts = new Map(detail.seasons.map((s) => [s.seasonNumber, s.episodeCount]))
+  let total = 0
+  let done = 0
+  for (let s = 1; s <= last.seasonNumber; s++) {
+    const maxEp = s === last.seasonNumber ? last.episodeNumber : counts.get(s) ?? 0
+    for (let e = 1; e <= maxEp; e++) {
+      total++
+      if (watched.has(`S${s}E${e}`)) done++
+    }
+  }
+  return { done, total }
+}
+
 // Viewing categories used by the profile library filters.
 //  - not_started: on the watchlist, nothing watched yet
 //  - watching:    started, still behind on aired episodes

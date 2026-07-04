@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { getSeason, getTitle } from '../lib/tmdb'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { computeNextUp, useEpisodeWatches, useToggleEpisode } from '../lib/tracking'
+import { airedProgress, computeNextUp, useEpisodeWatches, useToggleEpisode } from '../lib/tracking'
 import type { TitleDetail } from '../lib/types'
 import { Poster } from './Poster'
 
@@ -60,7 +60,9 @@ function UpNextCard({ row }: { row: WatchingRow }) {
     } as TitleDetail,
   )
 
-  const nextUp = detail ? computeNextUp(detail, watches.data ?? new Set()) : null
+  const watchedSet = watches.data ?? new Set<string>()
+  const nextUp = detail ? computeNextUp(detail, watchedSet) : null
+  const progress = detail ? airedProgress(detail, watchedSet) : { done: 0, total: 0 }
 
   // The season fetch gives the episode's title for a richer card.
   const { data: episodes } = useQuery({
@@ -84,6 +86,19 @@ function UpNextCard({ row }: { row: WatchingRow }) {
         />
       </Link>
       <p className="mt-1.5 truncate text-sm font-medium">{row.name}</p>
+      {progress.total > 0 && (
+        <div className="mt-1.5">
+          <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
+            <div
+              className="h-full rounded-full bg-brand-gradient"
+              style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-faint">
+            {progress.done}/{progress.total} episodes
+          </p>
+        </div>
+      )}
       {nextUp && (
         <>
           <p className="truncate text-xs text-muted">

@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getTitle, getSeason, IMG } from '../lib/tmdb'
+import { getTitle, getSeason, getRecommendations, IMG } from '../lib/tmdb'
 import type { MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
+import { PosterRail, trackedKey } from '../components/PosterRail'
 import { RatingStars } from '../components/RatingStars'
 import { useAuth } from '../lib/auth'
 import { useWatchRegion } from '../lib/region'
 import type { WatchProvider } from '../lib/types'
 import {
   useFollow,
+  useFollows,
   useMarkMovieWatched,
   useEpisodeWatches,
   useToggleEpisode,
@@ -134,9 +136,28 @@ export function TitleDetail() {
             </div>
           </section>
         )}
+
+        <div className="mt-7">
+          <MoreLikeThis title={title} />
+        </div>
       </div>
     </div>
   )
+}
+
+// Recommendations for the current title. Titles already in the user's library
+// are dimmed/badged (shares the rail behavior used on Home and Discover).
+function MoreLikeThis({ title }: { title: TitleDetailType }) {
+  const { data } = useQuery({
+    queryKey: ['recommendations', title.media_type, title.id],
+    queryFn: () => getRecommendations(title.media_type, title.id),
+  })
+  const { data: follows } = useFollows()
+  const tracked = useMemo(
+    () => new Set((follows ?? []).map((f) => trackedKey(f.media_type, f.tmdb_id))),
+    [follows],
+  )
+  return <PosterRail title="More like this" items={data ?? []} trackedIds={tracked} />
 }
 
 function Dot({ text }: { text: string }) {
