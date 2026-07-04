@@ -31,58 +31,94 @@ export function TitleDetail() {
     enabled: Boolean(mediaType && tmdbId),
   })
 
-  if (isLoading) return <p className="p-4 text-slate-400">Loading…</p>
-  if (error) return <p className="p-4 text-red-400">{(error as Error).message}</p>
+  if (isLoading) return <p className="p-6 text-sm text-muted">Loading…</p>
+  if (error) return <p className="p-6 text-sm text-red-400">{(error as Error).message}</p>
   if (!title) return null
 
   return (
-    <div>
-      {/* Backdrop header */}
-      <div className="relative h-44 w-full bg-slate-800">
-        {title.backdropPath && (
+    <div className="pb-4">
+      {/* Full-bleed backdrop with a scrim that fades into the page. */}
+      <div className="relative h-72 w-full overflow-hidden">
+        {title.backdropPath ? (
           <img
             src={IMG(title.backdropPath, 'w500') ?? undefined}
             alt=""
-            className="h-full w-full object-cover opacity-40"
+            className="h-full w-full object-cover"
           />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-surface-2 to-surface" />
         )}
+        <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/60 to-bg/10" />
+
         <button
           onClick={() => navigate(-1)}
-          className="absolute left-3 top-3 rounded-full bg-black/50 px-3 py-1 text-sm"
+          className="glass absolute left-4 top-12 grid h-9 w-9 place-items-center rounded-full border text-lg active:scale-90"
+          aria-label="Back"
         >
-          ← Back
+          ‹
         </button>
       </div>
 
-      <div className="-mt-16 px-4">
-        <div className="flex gap-3">
-          <Poster path={title.posterPath} alt={title.title} className="h-40 w-28 shrink-0 rounded-xl shadow-lg" />
-          <div className="mt-16 min-w-0">
-            <h1 className="text-lg font-bold leading-tight">{title.title}</h1>
-            <p className="text-sm text-slate-400">
-              {title.year ?? '—'}
-              {title.runtime ? ` · ${title.runtime}m` : ''}
-              {title.voteAverage ? ` · ★ ${title.voteAverage.toFixed(1)}` : ''}
-            </p>
-            <p className="mt-1 text-xs text-slate-400">{title.genres.join(' · ')}</p>
+      <div className="-mt-24 px-5">
+        <div className="flex gap-4">
+          <Poster
+            path={title.posterPath}
+            alt={title.title}
+            size="w342"
+            className="aspect-[2/3] w-28 shrink-0 shadow-2xl shadow-black/60"
+          />
+          <div className="mt-20 min-w-0 flex-1">
+            <h1 className="text-xl font-bold leading-tight tracking-tight text-balance">
+              {title.title}
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
+              {title.year && <span>{title.year}</span>}
+              {title.runtime ? <Dot text={`${title.runtime}m`} /> : null}
+              {title.voteAverage ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-xs font-medium text-amber-300">
+                  ★ {title.voteAverage.toFixed(1)}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
+        {title.genres.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {title.genres.map((g) => (
+              <span
+                key={g}
+                className="rounded-full border border-line bg-surface/60 px-3 py-1 text-xs text-muted"
+              >
+                {g}
+              </span>
+            ))}
+          </div>
+        )}
+
         <TrackingBar title={title} />
 
-        {title.overview && <p className="mt-4 text-sm leading-relaxed text-slate-300">{title.overview}</p>}
+        {title.overview && (
+          <p className="mt-5 text-sm leading-relaxed text-ink/80">{title.overview}</p>
+        )}
 
         {title.media_type === 'tv' && <Seasons show={title} />}
 
         {title.cast.length > 0 && (
-          <section className="mt-6">
-            <h2 className="mb-2 font-semibold">Cast</h2>
-            <div className="flex gap-3 overflow-x-auto pb-2">
+          <section className="mt-7">
+            <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Cast</h2>
+            <div className="no-scrollbar -mx-5 flex gap-4 overflow-x-auto px-5 pb-1">
               {title.cast.map((c) => (
                 <div key={c.name} className="w-16 shrink-0 text-center">
-                  <Poster path={c.profilePath} alt={c.name} size="w200" className="h-20 w-16 rounded-lg" />
-                  <p className="mt-1 truncate text-[11px] font-medium">{c.name}</p>
-                  <p className="truncate text-[10px] text-slate-500">{c.character}</p>
+                  <Poster
+                    path={c.profilePath}
+                    alt={c.name}
+                    size="w200"
+                    rounded="rounded-full"
+                    className="mx-auto h-16 w-16"
+                  />
+                  <p className="mt-1.5 truncate text-[11px] font-medium">{c.name}</p>
+                  <p className="truncate text-[10px] text-faint">{c.character}</p>
                 </div>
               ))}
             </div>
@@ -90,6 +126,15 @@ export function TitleDetail() {
         )}
       </div>
     </div>
+  )
+}
+
+function Dot({ text }: { text: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="h-1 w-1 rounded-full bg-faint" />
+      {text}
+    </span>
   )
 }
 
@@ -101,7 +146,7 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
 
   if (!enabled || !session) {
     return (
-      <p className="mt-4 rounded-xl bg-slate-800 p-3 text-center text-xs text-slate-400">
+      <p className="mt-5 rounded-2xl border border-line bg-surface/60 p-3.5 text-center text-xs text-muted">
         Sign in on the Profile tab to track this.
       </p>
     )
@@ -114,21 +159,24 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
   }
 
   return (
-    <div className="mt-4 flex gap-2">
+    <div className="mt-5 flex gap-2.5">
       <button
         onClick={() => setStatus.mutate(status ? null : 'watchlist')}
-        className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${
-          status ? 'bg-indigo-600' : 'bg-slate-700'
+        className={`flex-1 rounded-2xl py-3 text-sm font-semibold transition active:scale-[0.98] ${
+          status
+            ? 'bg-brand-gradient shadow-lg shadow-brand/25'
+            : 'border border-line bg-surface text-ink'
         }`}
       >
-        {status ? FOLLOW_LABELS[status] : '+ Track'}
+        {status ? `✓ ${FOLLOW_LABELS[status]}` : '+ Track'}
       </button>
 
       {status && (
         <button
           onClick={() => setStatus.mutate(nextStatus())}
-          className="rounded-xl bg-slate-700 px-3 py-2.5 text-sm"
+          className="grid w-12 place-items-center rounded-2xl border border-line bg-surface text-lg active:scale-90"
           title="Change status"
+          aria-label="Change status"
         >
           ⟳
         </button>
@@ -136,13 +184,19 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
 
       {title.media_type === 'movie' && (
         <button
-          onClick={() => markMovie.mutate(undefined, { onSuccess: () => {
-            setJustLogged(true)
-            setTimeout(() => setJustLogged(false), 1500)
-          } })}
-          className="rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold"
+          onClick={() =>
+            markMovie.mutate(undefined, {
+              onSuccess: () => {
+                setJustLogged(true)
+                setTimeout(() => setJustLogged(false), 1500)
+              },
+            })
+          }
+          className={`rounded-2xl px-4 text-sm font-semibold transition active:scale-95 ${
+            justLogged ? 'bg-watched text-bg' : 'border border-line bg-surface'
+          }`}
         >
-          {justLogged ? '✓ Logged' : '👁 Watched'}
+          {justLogged ? '✓ Logged' : '👁'}
         </button>
       )}
     </div>
@@ -152,23 +206,30 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
 function Seasons({ show }: { show: TitleDetailType }) {
   const [open, setOpen] = useState<number | null>(null)
   return (
-    <section className="mt-6">
-      <h2 className="mb-2 font-semibold">Seasons</h2>
-      <div className="space-y-2">
+    <section className="mt-7">
+      <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Seasons</h2>
+      <div className="space-y-2.5">
         {show.seasons.map((s) => (
-          <div key={s.seasonNumber} className="overflow-hidden rounded-xl bg-slate-800">
+          <div
+            key={s.seasonNumber}
+            className="overflow-hidden rounded-2xl border border-line bg-surface/60"
+          >
             <button
               onClick={() => setOpen(open === s.seasonNumber ? null : s.seasonNumber)}
-              className="flex w-full items-center gap-3 p-3 text-left active:bg-slate-700"
+              className="flex w-full items-center gap-3 p-3 text-left transition-colors active:bg-surface-2"
             >
-              <Poster path={s.posterPath} alt={s.name} size="w200" className="h-16 w-11 rounded-md" />
+              <Poster path={s.posterPath} alt={s.name} size="w200" className="h-16 w-11" rounded="rounded-lg" />
               <div className="flex-1">
                 <div className="font-medium">{s.name}</div>
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-faint">
                   {s.episodeCount} episodes{s.airDate ? ` · ${s.airDate.slice(0, 4)}` : ''}
                 </div>
               </div>
-              <span className="text-slate-500">{open === s.seasonNumber ? '▾' : '▸'}</span>
+              <span
+                className={`text-faint transition-transform ${open === s.seasonNumber ? 'rotate-90' : ''}`}
+              >
+                ›
+              </span>
             </button>
             {open === s.seasonNumber && <SeasonEpisodes show={show} seasonNumber={s.seasonNumber} />}
           </div>
@@ -188,10 +249,10 @@ function SeasonEpisodes({ show, seasonNumber }: { show: TitleDetailType; seasonN
   const toggle = useToggleEpisode(show)
   const watchedSet = watches.data ?? new Set<string>()
 
-  if (isLoading) return <p className="p-3 text-xs text-slate-400">Loading episodes…</p>
+  if (isLoading) return <p className="p-3 text-xs text-muted">Loading episodes…</p>
 
   return (
-    <ul className="divide-y divide-slate-700 border-t border-slate-700">
+    <ul className="divide-y divide-line border-t border-line">
       {episodes?.map((e) => {
         const key = `S${e.seasonNumber}E${e.episodeNumber}`
         const watched = watchedSet.has(key)
@@ -199,18 +260,19 @@ function SeasonEpisodes({ show, seasonNumber }: { show: TitleDetailType; seasonN
           <li key={key} className="flex items-center gap-3 p-3">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm">
-                <span className="text-slate-500">{e.episodeNumber}.</span> {e.name}
+                <span className="text-faint">{e.episodeNumber}.</span> {e.name}
               </div>
-              {e.airDate && <div className="text-[11px] text-slate-500">{e.airDate}</div>}
+              {e.airDate && <div className="text-[11px] text-faint">{e.airDate}</div>}
             </div>
             <button
               disabled={!session}
               onClick={() => toggle.mutate({ season: e.seasonNumber, episode: e.episodeNumber, watched })}
-              className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-40 ${
-                watched ? 'bg-emerald-600' : 'bg-slate-700'
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-semibold transition active:scale-90 disabled:opacity-40 ${
+                watched ? 'bg-watched text-bg' : 'border border-line bg-surface text-muted'
               }`}
+              aria-label={watched ? 'Watched' : 'Mark watched'}
             >
-              {watched ? '✓' : 'Watch'}
+              ✓
             </button>
           </li>
         )

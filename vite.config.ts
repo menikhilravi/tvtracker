@@ -15,8 +15,8 @@ export default defineConfig({
         name: 'TV Tracker',
         short_name: 'TVTracker',
         description: 'Track the TV shows and movies you watch.',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#08080c',
+        background_color: '#08080c',
         display: 'standalone',
         start_url: '/',
         icons: [

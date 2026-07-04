@@ -11,26 +11,35 @@ export function Profile() {
 
   if (!isSupabaseConfigured) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-bold">Profile</h1>
-        <p className="mt-4 rounded-xl bg-slate-800 p-4 text-sm text-slate-300">
-          Supabase isn’t configured yet. Add <code>VITE_SUPABASE_URL</code> and{' '}
-          <code>VITE_SUPABASE_ANON_KEY</code> to <code>.env</code> (see the README), then reload.
-          Search still works without it.
+      <div className="px-5 pt-14">
+        <h1 className="text-3xl font-bold tracking-tight">Profile</h1>
+        <p className="mt-5 rounded-2xl border border-line bg-surface/60 p-4 text-sm leading-relaxed text-muted">
+          Supabase isn’t configured yet. Add <code className="text-ink">VITE_SUPABASE_URL</code> and{' '}
+          <code className="text-ink">VITE_SUPABASE_ANON_KEY</code> to <code className="text-ink">.env</code>{' '}
+          (see the README), then reload. Search still works without it.
         </p>
       </div>
     )
   }
 
   if (session) {
+    const email = session.user.email ?? ''
+    const initial = email.charAt(0).toUpperCase() || '?'
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-bold">Profile</h1>
-        <p className="mt-4 text-sm text-slate-400">Signed in as</p>
-        <p className="font-medium">{session.user.email}</p>
+      <div className="px-5 pt-14">
+        <h1 className="text-3xl font-bold tracking-tight">Profile</h1>
+        <div className="mt-6 flex items-center gap-4 rounded-3xl border border-line bg-surface/60 p-5">
+          <div className="grid h-14 w-14 place-items-center rounded-full bg-brand-gradient text-2xl font-bold">
+            {initial}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-faint">Signed in as</p>
+            <p className="truncate font-medium">{email}</p>
+          </div>
+        </div>
         <button
           onClick={() => signOut()}
-          className="mt-6 rounded-xl bg-slate-700 px-5 py-2.5 font-semibold"
+          className="mt-4 w-full rounded-2xl border border-line bg-surface py-3 font-semibold active:scale-[0.98]"
         >
           Sign out
         </button>
@@ -48,12 +57,16 @@ export function Profile() {
   }
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold">Sign in</h1>
-      <form onSubmit={submit} className="mt-4 space-y-3">
-        <p className="text-sm text-slate-400">
-          Sign in with the email and password for your account.
-        </p>
+    <div className="flex min-h-dvh flex-col justify-center px-6">
+      <div className="mb-8 text-center">
+        <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-brand-gradient text-3xl shadow-2xl shadow-brand/30">
+          📺
+        </div>
+        <h1 className="mt-5 text-2xl font-bold tracking-tight">Welcome back</h1>
+        <p className="mt-1.5 text-sm text-muted">Sign in to your tracker</p>
+      </div>
+
+      <form onSubmit={submit} className="space-y-3">
         <input
           type="email"
           autoComplete="username"
@@ -61,7 +74,7 @@ export function Profile() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 outline-none focus:border-indigo-500"
+          className="w-full rounded-2xl border border-line bg-surface/80 px-4 py-3.5 outline-none transition-colors placeholder:text-faint focus:border-brand/60 focus:bg-surface"
         />
         <input
           type="password"
@@ -70,21 +83,22 @@ export function Profile() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
-          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 outline-none focus:border-indigo-500"
+          className="w-full rounded-2xl border border-line bg-surface/80 px-4 py-3.5 outline-none transition-colors placeholder:text-faint focus:border-brand/60 focus:bg-surface"
         />
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-xl bg-indigo-600 py-3 font-semibold disabled:opacity-50"
+          className="w-full rounded-2xl bg-brand-gradient py-3.5 font-semibold shadow-lg shadow-brand/25 transition active:scale-[0.98] disabled:opacity-50"
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-center text-sm text-red-400">{error}</p>}
       </form>
-      <p className="mt-4 text-xs text-slate-500">
+
+      <p className="mt-6 text-center text-xs leading-relaxed text-faint">
         No account yet? Create your user in the Supabase dashboard under
-        Authentication → Users → Add user (set a password and confirm the email),
-        then sign in here.
+        Authentication → Users → Add user (set a password and auto-confirm), then
+        sign in here.
       </p>
     </div>
   )
