@@ -138,6 +138,50 @@ screen**. It now launches full-screen like a native app.
 
 ---
 
+## Import your TV Time data
+
+Migrate your TV Time history (shows, watched episodes, ratings) from a GDPR
+export. Request the export in TV Time (Settings → account/privacy) and unzip it.
+
+1. **Redeploy the proxy** (adds the id-conversion endpoint the importer needs):
+
+   ```bash
+   supabase functions deploy tmdb-proxy
+   ```
+
+2. **Dry run** to preview what will be imported (writes nothing):
+
+   ```bash
+   node scripts/import-tvtime.mjs /path/to/gdpr-data --dry-run
+   ```
+
+3. **Run it** — signs in as your account and upserts everything:
+
+   ```bash
+   node scripts/import-tvtime.mjs /path/to/gdpr-data          # first time
+   node scripts/import-tvtime.mjs /path/to/gdpr-data --reset  # wipe & re-import
+   ```
+
+   Use `--reset` to clear your existing follows/episode_watches/ratings first —
+   handy if a previous import left inaccurate data. It reads `VITE_SUPABASE_URL`
+   / `VITE_SUPABASE_ANON_KEY` from `.env`, prompts for your tracker email +
+   password, and writes `follows`, `episode_watches`, and `ratings`. It's
+   **idempotent** and caches TMDB lookups to `tmdb-id-map.json` in the export
+   folder (delete that file to force a fresh re-fetch).
+
+   **How progress is reconstructed:** TV Time's export doesn't contain a
+   complete per-episode watch list (only ~40% of episodes appear as rows) and
+   has no explicit status. The reliable signal is `nb_episodes_seen` — a count
+   per show. So the importer marks the **first N episodes** of each show watched
+   (N = that count, in TMDB order) and derives status by comparing N to the
+   show's real episode count (ended + all seen → *completed*; otherwise
+   *watching*; nothing seen → *watchlist*). This assumes you watched roughly in
+   order, which is accurate for the vast majority of shows; a show you watched
+   out of order may mark slightly different episodes (the total will match).
+
+   > Movies aren't imported — the export only identifies them by name, with no
+   > reliable id to match against TMDB.
+
 ## Project layout
 
 ```

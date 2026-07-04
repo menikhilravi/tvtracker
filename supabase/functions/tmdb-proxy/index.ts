@@ -23,6 +23,8 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^tv\/\d+$/, params: ['append_to_response'] },
   { pattern: /^tv\/\d+\/season\/\d+$/, params: [] },
   { pattern: /^trending\/(all|movie|tv)\/(day|week)$/, params: ['page'] },
+  // Convert an external id (e.g. TheTVDB) to a TMDB id — used by the importer.
+  { pattern: /^find\/[^/]+$/, params: ['external_source'] },
 ]
 
 const CORS = {
