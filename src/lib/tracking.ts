@@ -3,10 +3,11 @@
 // When Supabase is not configured they no-op so the browse experience keeps
 // working.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { useAuth } from './auth'
-import type { TitleDetail } from './types'
+import { getTitle } from './tmdb'
+import type { MediaType, TitleDetail } from './types'
 
 // Keep a lightweight copy of the title so history/watchlist can render without
 // re-fetching TMDB for each row.
@@ -133,7 +134,8 @@ export function useToggleEpisode(show: TitleDetail) {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['episode-watches', show.id] })
+      // Prefix match invalidates both the per-show set and the ['episode-watches','all'] map.
+      qc.invalidateQueries({ queryKey: ['episode-watches'] })
       qc.invalidateQueries({ queryKey: ['history'] })
       qc.invalidateQueries({ queryKey: ['up-next'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
@@ -226,6 +228,132 @@ export function useStats() {
       return { episodesWatched, moviesWatched, showsTracked, completed, estimatedMinutes }
     },
   })
+}
+
+// --- Library (follows + derived viewing state) ------------------------------
+
+export interface FollowRow {
+  tmdb_id: number
+  media_type: MediaType
+  status: FollowStatus
+  name: string | null
+  poster_path: string | null
+  updated_at: string
+}
+
+export function useFollows() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['follows'],
+    enabled: Boolean(supabase && session),
+    queryFn: async (): Promise<FollowRow[]> => {
+      const { data, error } = await supabase!
+        .from('follows')
+        .select('tmdb_id, media_type, status, name, poster_path, updated_at')
+        .order('updated_at', { ascending: false })
+      if (error) throw error
+      return data as FollowRow[]
+    },
+  })
+}
+
+// Every watched episode across all shows, as showId -> Set of "S{n}E{n}" keys.
+export function useAllEpisodeWatches() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['episode-watches', 'all'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const { data, error } = await supabase!
+        .from('episode_watches')
+        .select('tmdb_show_id, season_number, episode_number')
+      if (error) throw error
+      const map = new Map<number, Set<string>>()
+      for (const r of data) {
+        const set = map.get(r.tmdb_show_id) ?? new Set<string>()
+        set.add(`S${r.season_number}E${r.episode_number}`)
+        map.set(r.tmdb_show_id, set)
+      }
+      return map
+    },
+  })
+}
+
+// The first aired episode a user hasn't watched, or null if caught up.
+export function computeNextUp(
+  detail: TitleDetail,
+  watched: Set<string>,
+): { season: number; episode: number } | null {
+  const last = detail.lastEpisodeToAir
+  if (!last) return null
+  const counts = new Map(detail.seasons.map((s) => [s.seasonNumber, s.episodeCount]))
+  for (let s = 1; s <= last.seasonNumber; s++) {
+    const maxEp = s === last.seasonNumber ? last.episodeNumber : counts.get(s) ?? 0
+    for (let e = 1; e <= maxEp; e++) {
+      if (!watched.has(`S${s}E${e}`)) return { season: s, episode: e }
+    }
+  }
+  return null
+}
+
+// Viewing categories used by the profile library filters.
+//  - not_started: on the watchlist, nothing watched yet
+//  - watching:    started, still behind on aired episodes
+//  - up_to_date:  caught up on every aired episode (show hasn't ended / more to come)
+//  - finished:    marked completed
+//  - stopped:     dropped
+export type LibraryCategory = 'watching' | 'not_started' | 'up_to_date' | 'finished' | 'stopped'
+
+export interface LibraryItem extends FollowRow {
+  category: LibraryCategory
+}
+
+function categorize(
+  f: FollowRow,
+  detailById: Map<number, TitleDetail>,
+  epMap: Map<number, Set<string>>,
+): LibraryCategory {
+  if (f.status === 'dropped') return 'stopped'
+  if (f.status === 'completed') return 'finished'
+  if (f.status === 'watchlist') return 'not_started'
+  // status === 'watching'
+  if (f.media_type === 'movie') return 'watching'
+  const detail = detailById.get(f.tmdb_id)
+  if (!detail) return 'watching' // detail still loading — treat as watching for now
+  return computeNextUp(detail, epMap.get(f.tmdb_id) ?? new Set()) ? 'watching' : 'up_to_date'
+}
+
+export function useLibrary() {
+  const follows = useFollows()
+  const epWatches = useAllEpisodeWatches()
+
+  // Only actively-watching TV shows need TMDB detail to tell "watching" (behind)
+  // apart from "up to date" (caught up). Everything else categorizes from status.
+  const watchingTv = (follows.data ?? []).filter(
+    (f) => f.media_type === 'tv' && f.status === 'watching',
+  )
+  const details = useQueries({
+    queries: watchingTv.map((s) => ({
+      queryKey: ['title', 'tv', s.tmdb_id],
+      queryFn: () => getTitle('tv', s.tmdb_id),
+    })),
+  })
+
+  const detailById = new Map<number, TitleDetail>()
+  for (const d of details) if (d.data) detailById.set(d.data.id, d.data)
+
+  const epMap = epWatches.data ?? new Map<number, Set<string>>()
+  const items: LibraryItem[] = (follows.data ?? []).map((f) => ({
+    ...f,
+    category: categorize(f, detailById, epMap),
+  }))
+
+  return {
+    items,
+    isLoading: follows.isLoading,
+    // True while watching-show details are still resolving (categories may shift).
+    refining: details.some((d) => d.isLoading),
+  }
 }
 
 // --- Watch history ----------------------------------------------------------

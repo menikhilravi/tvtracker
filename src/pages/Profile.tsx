@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import { useStats } from '../lib/tracking'
+import { isSupabaseConfigured } from '../lib/supabase'
+import { useLibrary, useStats, type LibraryCategory, type LibraryItem } from '../lib/tracking'
 import { Poster } from '../components/Poster'
-import type { MediaType } from '../lib/types'
 
 export function Profile() {
   const { session, signInWithPassword, signOut } = useAuth()
@@ -44,7 +42,7 @@ export function Profile() {
         </div>
 
         <StatsSection />
-        <CompletedSection />
+        <LibrarySection />
 
         <Link
           to="/history"
@@ -133,7 +131,7 @@ function StatsSection() {
   const tiles = [
     { icon: '📺', label: 'Episodes', value: stats.episodesWatched },
     { icon: '🎬', label: 'Movies', value: stats.moviesWatched },
-    { icon: '✓', label: 'Completed', value: stats.completed },
+    { icon: '✓', label: 'Finished', value: stats.completed },
   ]
 
   return (
@@ -164,65 +162,67 @@ function StatsSection() {
   )
 }
 
-// --- Completed library ------------------------------------------------------
+// --- Library ----------------------------------------------------------------
 
-interface CompletedRow {
-  tmdb_id: number
-  media_type: MediaType
-  name: string | null
-  poster_path: string | null
-  updated_at: string
-}
+type Filter = 'all' | LibraryCategory
+type SortKey = 'recent' | 'title'
 
-type SortKey = 'recent' | 'title' | 'type'
-
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: 'recent', label: 'Recently completed' },
-  { key: 'title', label: 'Title (A–Z)' },
-  { key: 'type', label: 'Type' },
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'watching', label: 'Watching' },
+  { key: 'not_started', label: 'Haven’t started' },
+  { key: 'up_to_date', label: 'Up to date' },
+  { key: 'finished', label: 'Finished' },
+  { key: 'stopped', label: 'Stopped' },
 ]
 
-function CompletedSection() {
-  const { session } = useAuth()
+const CATEGORY_LABEL: Record<LibraryCategory, string> = {
+  watching: 'Watching',
+  not_started: 'Haven’t started',
+  up_to_date: 'Up to date',
+  finished: 'Finished',
+  stopped: 'Stopped',
+}
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'recent', label: 'Recently updated' },
+  { key: 'title', label: 'Title (A–Z)' },
+]
+
+function LibrarySection() {
+  const { items, isLoading, refining } = useLibrary()
+  const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('recent')
 
-  const { data: rows } = useQuery({
-    queryKey: ['completed-follows'],
-    enabled: Boolean(supabase && session),
-    queryFn: async (): Promise<CompletedRow[]> => {
-      const { data, error } = await supabase!
-        .from('follows')
-        .select('tmdb_id, media_type, name, poster_path, updated_at')
-        .eq('status', 'completed')
-      if (error) throw error
-      return data as CompletedRow[]
-    },
-  })
-
-  const sorted = useMemo(() => {
-    const items = [...(rows ?? [])]
-    const byName = (a: CompletedRow, b: CompletedRow) =>
-      (a.name ?? '').localeCompare(b.name ?? '')
-    switch (sort) {
-      case 'title':
-        return items.sort(byName)
-      case 'type':
-        return items.sort(
-          (a, b) => a.media_type.localeCompare(b.media_type) || byName(a, b),
-        )
-      case 'recent':
-      default:
-        return items.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = {
+      all: items.length,
+      watching: 0,
+      not_started: 0,
+      up_to_date: 0,
+      finished: 0,
+      stopped: 0,
     }
-  }, [rows, sort])
+    for (const it of items) c[it.category]++
+    return c
+  }, [items])
+
+  const shown = useMemo(() => {
+    const list = items.filter((it) => filter === 'all' || it.category === filter)
+    const byName = (a: LibraryItem, b: LibraryItem) => (a.name ?? '').localeCompare(b.name ?? '')
+    return sort === 'title'
+      ? [...list].sort(byName)
+      : [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  }, [items, filter, sort])
 
   return (
     <div className="mt-8">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold tracking-wide text-muted">
-          Completed{sorted.length > 0 && <span className="text-faint"> · {sorted.length}</span>}
+          Library
+          {refining && <span className="ml-1.5 text-[11px] font-normal text-faint">refining…</span>}
         </h2>
-        {sorted.length > 1 && (
+        {shown.length > 1 && (
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
@@ -237,25 +237,55 @@ function CompletedSection() {
         )}
       </div>
 
-      {sorted.length === 0 ? (
+      {/* Filter chips. */}
+      <div className="no-scrollbar -mx-5 mb-4 flex gap-2 overflow-x-auto px-5">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition active:scale-[0.97] ${
+              filter === f.key
+                ? 'border-transparent bg-brand-gradient text-white shadow-md shadow-brand/25'
+                : 'border-line bg-surface/60 text-muted'
+            }`}
+          >
+            {f.label}
+            <span className={filter === f.key ? 'text-white/70' : 'text-faint'}> {counts[f.key]}</span>
+          </button>
+        ))}
+      </div>
+
+      {isLoading ? (
         <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
-          Nothing completed yet. Mark a show or movie as completed to see it here.
+          Loading your library…
+        </p>
+      ) : shown.length === 0 ? (
+        <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
+          Nothing here yet.
         </p>
       ) : (
         <div className="grid grid-cols-3 gap-3">
-          {sorted.map((r) => (
+          {shown.map((r) => (
             <Link
               key={`${r.media_type}-${r.tmdb_id}`}
               to={`/title/${r.media_type}/${r.tmdb_id}`}
               className="active:scale-[0.97]"
             >
-              <Poster
-                path={r.poster_path}
-                alt={r.name ?? ''}
-                size="w342"
-                className="aspect-[2/3] w-full shadow-lg shadow-black/40"
-              />
+              <div className="relative">
+                <Poster
+                  path={r.poster_path}
+                  alt={r.name ?? ''}
+                  size="w342"
+                  className="aspect-[2/3] w-full shadow-lg shadow-black/40"
+                />
+                <span className="absolute right-1.5 top-1.5 rounded-md bg-black/60 px-1 py-0.5 text-[11px] leading-none backdrop-blur">
+                  {r.media_type === 'tv' ? '📺' : '🎬'}
+                </span>
+              </div>
               <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+              {filter === 'all' && (
+                <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
+              )}
             </Link>
           ))}
         </div>

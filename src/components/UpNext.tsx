@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { getSeason, getTitle } from '../lib/tmdb'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { useEpisodeWatches, useToggleEpisode } from '../lib/tracking'
+import { computeNextUp, useEpisodeWatches, useToggleEpisode } from '../lib/tracking'
 import type { TitleDetail } from '../lib/types'
 import { Poster } from './Poster'
 
@@ -11,20 +11,6 @@ interface WatchingRow {
   tmdb_id: number
   name: string | null
   poster_path: string | null
-}
-
-// The first aired episode the user hasn't marked watched, or null if caught up.
-function computeNextUp(detail: TitleDetail, watched: Set<string>) {
-  const last = detail.lastEpisodeToAir
-  if (!last) return null
-  const counts = new Map(detail.seasons.map((s) => [s.seasonNumber, s.episodeCount]))
-  for (let s = 1; s <= last.seasonNumber; s++) {
-    const maxEp = s === last.seasonNumber ? last.episodeNumber : counts.get(s) ?? 0
-    for (let e = 1; e <= maxEp; e++) {
-      if (!watched.has(`S${s}E${e}`)) return { season: s, episode: e }
-    }
-  }
-  return null
 }
 
 export function UpNextRail() {

@@ -15,12 +15,13 @@ import {
   type FollowStatus,
 } from '../lib/tracking'
 
-const FOLLOW_LABELS: Record<FollowStatus, string> = {
-  watchlist: 'Watchlist',
-  watching: 'Watching',
-  completed: 'Completed',
-  dropped: 'Dropped',
-}
+// The user-facing status options, in the order shown in the picker.
+const STATUS_OPTIONS: { value: FollowStatus; label: string }[] = [
+  { value: 'watchlist', label: 'Watchlist' },
+  { value: 'watching', label: 'Watching' },
+  { value: 'completed', label: 'Finished' },
+  { value: 'dropped', label: 'Stopped' },
+]
 
 export function TitleDetail() {
   const { mediaType, id } = useParams<{ mediaType: MediaType; id: string }>()
@@ -156,54 +157,73 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
     )
   }
 
-  const cycle: FollowStatus[] = ['watchlist', 'watching', 'completed']
-  const nextStatus = () => {
-    const idx = status ? cycle.indexOf(status) : -1
-    return cycle[(idx + 1) % cycle.length]
+  if (!status) {
+    return (
+      <div className="mt-5 flex gap-2.5">
+        <button
+          onClick={() => setStatus.mutate('watchlist')}
+          className="flex-1 rounded-2xl border border-line bg-surface py-3 text-sm font-semibold text-ink transition active:scale-[0.98]"
+        >
+          + Track
+        </button>
+        {title.media_type === 'movie' && <MovieLogButton onLog={logMovie} justLogged={justLogged} />}
+      </div>
+    )
   }
 
   return (
-    <div className="mt-5 flex gap-2.5">
+    <div className="mt-5">
+      <div className="flex gap-2.5">
+        <div className="flex flex-1 flex-wrap gap-1.5 rounded-2xl border border-line bg-surface/60 p-1.5">
+          {STATUS_OPTIONS.map((o) => {
+            const isActive = status === o.value
+            return (
+              <button
+                key={o.value}
+                onClick={() => setStatus.mutate(o.value)}
+                className={`flex-1 rounded-xl px-2 py-2 text-xs font-semibold transition active:scale-[0.97] ${
+                  isActive ? 'bg-brand-gradient text-white shadow-md shadow-brand/25' : 'text-muted'
+                }`}
+              >
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+        {title.media_type === 'movie' && <MovieLogButton onLog={logMovie} justLogged={justLogged} />}
+      </div>
+
       <button
-        onClick={() => setStatus.mutate(status ? null : 'watchlist')}
-        className={`flex-1 rounded-2xl py-3 text-sm font-semibold transition active:scale-[0.98] ${
-          status
-            ? 'bg-brand-gradient shadow-lg shadow-brand/25'
-            : 'border border-line bg-surface text-ink'
-        }`}
+        onClick={() => setStatus.mutate(null)}
+        className="mt-2.5 text-xs text-faint active:text-muted"
       >
-        {status ? `✓ ${FOLLOW_LABELS[status]}` : '+ Track'}
+        Remove from library
       </button>
-
-      {status && (
-        <button
-          onClick={() => setStatus.mutate(nextStatus())}
-          className="grid w-12 place-items-center rounded-2xl border border-line bg-surface text-lg active:scale-90"
-          title="Change status"
-          aria-label="Change status"
-        >
-          ⟳
-        </button>
-      )}
-
-      {title.media_type === 'movie' && (
-        <button
-          onClick={() =>
-            markMovie.mutate(undefined, {
-              onSuccess: () => {
-                setJustLogged(true)
-                setTimeout(() => setJustLogged(false), 1500)
-              },
-            })
-          }
-          className={`rounded-2xl px-4 text-sm font-semibold transition active:scale-95 ${
-            justLogged ? 'bg-watched text-bg' : 'border border-line bg-surface'
-          }`}
-        >
-          {justLogged ? '✓ Logged' : '👁'}
-        </button>
-      )}
     </div>
+  )
+
+  function logMovie() {
+    markMovie.mutate(undefined, {
+      onSuccess: () => {
+        setJustLogged(true)
+        setTimeout(() => setJustLogged(false), 1500)
+      },
+    })
+  }
+}
+
+function MovieLogButton({ onLog, justLogged }: { onLog: () => void; justLogged: boolean }) {
+  return (
+    <button
+      onClick={onLog}
+      className={`shrink-0 self-start rounded-2xl px-4 py-3 text-sm font-semibold transition active:scale-95 ${
+        justLogged ? 'bg-watched text-bg' : 'border border-line bg-surface'
+      }`}
+      title="Log a watch"
+      aria-label="Log a watch"
+    >
+      {justLogged ? '✓ Logged' : '👁'}
+    </button>
   )
 }
 
