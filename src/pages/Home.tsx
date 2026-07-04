@@ -9,7 +9,8 @@ interface FollowRow {
   tmdb_id: number
   media_type: MediaType
   status: string
-  titles: { name: string; poster_path: string | null } | null
+  name: string | null
+  poster_path: string | null
 }
 
 export function Home() {
@@ -21,13 +22,10 @@ export function Home() {
     queryFn: async (): Promise<FollowRow[]> => {
       const { data, error } = await supabase!
         .from('follows')
-        .select('tmdb_id, media_type, status, titles!inner(name, poster_path)')
+        .select('tmdb_id, media_type, status, name, poster_path')
         .order('updated_at', { ascending: false })
       if (error) throw error
-      // Supabase returns the joined relation as an array; normalize to a single object.
-      return (data as unknown as (Omit<FollowRow, 'titles'> & { titles: FollowRow['titles'][] })[]).map(
-        (r) => ({ ...r, titles: Array.isArray(r.titles) ? r.titles[0] ?? null : r.titles }),
-      )
+      return data as FollowRow[]
     },
   })
 
@@ -86,12 +84,12 @@ function Shelf({ title, rows, empty }: { title: string; rows: FollowRow[]; empty
               className="w-24 shrink-0"
             >
               <Poster
-                path={r.titles?.poster_path ?? null}
-                alt={r.titles?.name ?? ''}
+                path={r.poster_path}
+                alt={r.name ?? ''}
                 size="w200"
                 className="h-36 w-24 rounded-lg"
               />
-              <p className="mt-1 truncate text-xs">{r.titles?.name}</p>
+              <p className="mt-1 truncate text-xs">{r.name}</p>
             </Link>
           ))}
         </div>

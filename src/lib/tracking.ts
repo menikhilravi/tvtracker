@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { useAuth } from './auth'
-import type { MediaType, TitleDetail } from './types'
+import type { TitleDetail } from './types'
 
 // Keep a lightweight copy of the title so history/watchlist can render without
 // re-fetching TMDB for each row.
@@ -26,7 +26,11 @@ async function cacheTitle(t: Pick<TitleDetail, 'id' | 'media_type' | 'title' | '
 
 export type FollowStatus = 'watchlist' | 'watching' | 'completed' | 'dropped'
 
-export function useFollow(tmdbId: number, mediaType: MediaType) {
+export function useFollow(
+  title: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath'>,
+) {
+  const tmdbId = title.id
+  const mediaType = title.media_type
   const { session } = useAuth()
   const qc = useQueryClient()
   const enabled = Boolean(supabase && session)
@@ -56,7 +60,15 @@ export function useFollow(tmdbId: number, mediaType: MediaType) {
       await supabase
         .from('follows')
         .upsert(
-          { tmdb_id: tmdbId, media_type: mediaType, status, updated_at: new Date().toISOString() },
+          {
+            tmdb_id: tmdbId,
+            media_type: mediaType,
+            status,
+            // Denormalized so Home can render lists without a join/extra fetch.
+            name: title.title,
+            poster_path: title.posterPath,
+            updated_at: new Date().toISOString(),
+          },
           { onConflict: 'user_id,tmdb_id,media_type' },
         )
       return status

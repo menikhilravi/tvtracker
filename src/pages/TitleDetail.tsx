@@ -95,7 +95,7 @@ export function TitleDetail() {
 
 function TrackingBar({ title }: { title: TitleDetailType }) {
   const { session } = useAuth()
-  const { status, setStatus, enabled } = useFollow(title.id, title.media_type)
+  const { status, setStatus, enabled } = useFollow(title)
   const markMovie = useMarkMovieWatched(title)
   const [justLogged, setJustLogged] = useState(false)
 

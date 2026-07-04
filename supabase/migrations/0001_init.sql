@@ -39,14 +39,17 @@ create policy "titles updatable by authenticated"
 -- follows: the user's relationship to a title (watchlist / watching / etc.)
 -- ---------------------------------------------------------------------------
 create table if not exists public.follows (
-  id         bigint generated always as identity primary key,
-  user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  tmdb_id    integer not null,
-  media_type text not null check (media_type in ('movie', 'tv')),
-  status     text not null default 'watchlist'
-             check (status in ('watchlist', 'watching', 'completed', 'dropped')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
+  id          bigint generated always as identity primary key,
+  user_id     uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  tmdb_id     integer not null,
+  media_type  text not null check (media_type in ('movie', 'tv')),
+  status      text not null default 'watchlist'
+              check (status in ('watchlist', 'watching', 'completed', 'dropped')),
+  -- Denormalized display fields so lists render without joining `titles`.
+  name        text,
+  poster_path text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
   unique (user_id, tmdb_id, media_type)
 );
 
