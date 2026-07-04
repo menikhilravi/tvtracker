@@ -167,13 +167,12 @@ function StatsSection() {
 type Filter = 'all' | LibraryCategory
 type SortKey = 'recent' | 'title'
 
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'watching', label: 'Watching' },
-  { key: 'not_started', label: 'Haven’t started' },
-  { key: 'up_to_date', label: 'Up to date' },
-  { key: 'finished', label: 'Finished' },
-  { key: 'stopped', label: 'Stopped' },
+const CATEGORY_ORDER: LibraryCategory[] = [
+  'watching',
+  'not_started',
+  'up_to_date',
+  'finished',
+  'stopped',
 ]
 
 const CATEGORY_LABEL: Record<LibraryCategory, string> = {
@@ -191,12 +190,56 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 
 function LibrarySection() {
   const { items, isLoading, refining } = useLibrary()
+  const [search, setSearch] = useState('')
+
+  const q = search.trim().toLowerCase()
+  const match = (it: LibraryItem) => !q || (it.name ?? '').toLowerCase().includes(q)
+  const tv = items.filter((i) => i.media_type === 'tv' && match(i))
+  const movies = items.filter((i) => i.media_type === 'movie' && match(i))
+
+  return (
+    <div className="mt-8">
+      <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">
+        Library
+        {refining && <span className="ml-1.5 text-[11px] font-normal text-faint">refining…</span>}
+      </h2>
+
+      <div className="relative mb-5">
+        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-faint">
+          🔍
+        </span>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search your shows & movies"
+          className="w-full rounded-2xl border border-line bg-surface/80 py-2.5 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/60 focus:bg-surface"
+        />
+      </div>
+
+      {isLoading ? (
+        <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
+          Loading your library…
+        </p>
+      ) : tv.length === 0 && movies.length === 0 ? (
+        <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
+          {q ? `No matches for “${search.trim()}”.` : 'Nothing tracked yet.'}
+        </p>
+      ) : (
+        <>
+          <LibraryGroup title="TV Shows" icon="📺" items={tv} />
+          <LibraryGroup title="Movies" icon="🎬" items={movies} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function LibraryGroup({ title, icon, items }: { title: string; icon: string; items: LibraryItem[] }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('recent')
 
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = {
-      all: items.length,
+    const c: Record<LibraryCategory, number> = {
       watching: 0,
       not_started: 0,
       up_to_date: 0,
@@ -207,21 +250,26 @@ function LibrarySection() {
     return c
   }, [items])
 
+  // Only offer filters that actually have items in this group.
+  const filters: Filter[] = ['all', ...CATEGORY_ORDER.filter((c) => counts[c] > 0)]
+  const active: Filter = filters.includes(filter) ? filter : 'all'
+
   const shown = useMemo(() => {
-    const list = items.filter((it) => filter === 'all' || it.category === filter)
+    const list = items.filter((it) => active === 'all' || it.category === active)
     const byName = (a: LibraryItem, b: LibraryItem) => (a.name ?? '').localeCompare(b.name ?? '')
     return sort === 'title'
       ? [...list].sort(byName)
       : [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-  }, [items, filter, sort])
+  }, [items, active, sort])
+
+  if (items.length === 0) return null
 
   return (
-    <div className="mt-8">
+    <div className="mb-8">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold tracking-wide text-muted">
-          Library
-          {refining && <span className="ml-1.5 text-[11px] font-normal text-faint">refining…</span>}
-        </h2>
+        <h3 className="text-sm font-semibold">
+          {icon} {title} <span className="text-faint">· {items.length}</span>
+        </h3>
         {shown.length > 1 && (
           <select
             value={sort}
@@ -237,59 +285,44 @@ function LibrarySection() {
         )}
       </div>
 
-      {/* Filter chips. */}
       <div className="no-scrollbar -mx-5 mb-4 flex gap-2 overflow-x-auto px-5">
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
+            key={f}
+            onClick={() => setFilter(f)}
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition active:scale-[0.97] ${
-              filter === f.key
+              active === f
                 ? 'border-transparent bg-brand-gradient text-white shadow-md shadow-brand/25'
                 : 'border-line bg-surface/60 text-muted'
             }`}
           >
-            {f.label}
-            <span className={filter === f.key ? 'text-white/70' : 'text-faint'}> {counts[f.key]}</span>
+            {f === 'all' ? 'All' : CATEGORY_LABEL[f]}
+            <span className={active === f ? 'text-white/70' : 'text-faint'}>
+              {' '}
+              {f === 'all' ? items.length : counts[f]}
+            </span>
           </button>
         ))}
       </div>
 
-      {isLoading ? (
-        <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
-          Loading your library…
-        </p>
-      ) : shown.length === 0 ? (
-        <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
-          Nothing here yet.
-        </p>
-      ) : (
-        <div className="grid grid-cols-3 gap-3">
-          {shown.map((r) => (
-            <Link
-              key={`${r.media_type}-${r.tmdb_id}`}
-              to={`/title/${r.media_type}/${r.tmdb_id}`}
-              className="active:scale-[0.97]"
-            >
-              <div className="relative">
-                <Poster
-                  path={r.poster_path}
-                  alt={r.name ?? ''}
-                  size="w342"
-                  className="aspect-[2/3] w-full shadow-lg shadow-black/40"
-                />
-                <span className="absolute right-1.5 top-1.5 rounded-md bg-black/60 px-1 py-0.5 text-[11px] leading-none backdrop-blur">
-                  {r.media_type === 'tv' ? '📺' : '🎬'}
-                </span>
-              </div>
-              <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
-              {filter === 'all' && (
-                <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
-              )}
-            </Link>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-3 gap-3">
+        {shown.map((r) => (
+          <Link
+            key={`${r.media_type}-${r.tmdb_id}`}
+            to={`/title/${r.media_type}/${r.tmdb_id}`}
+            className="active:scale-[0.97]"
+          >
+            <Poster
+              path={r.poster_path}
+              alt={r.name ?? ''}
+              size="w342"
+              className="aspect-[2/3] w-full shadow-lg shadow-black/40"
+            />
+            <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+            <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
+          </Link>
+        ))}
+      </div>
     </div>
   )
 }

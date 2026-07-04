@@ -11,6 +11,7 @@ import {
   useMarkMovieWatched,
   useEpisodeWatches,
   useToggleEpisode,
+  useToggleSeason,
   useRating,
   type FollowStatus,
 } from '../lib/tracking'
@@ -295,78 +296,148 @@ function RatingSection({ title }: { title: TitleDetailType }) {
 
 function Seasons({ show }: { show: TitleDetailType }) {
   const [open, setOpen] = useState<number | null>(null)
+  const watches = useEpisodeWatches(show.id)
+  const watchedSet = watches.data ?? new Set<string>()
+
   return (
     <section className="mt-7">
       <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Seasons</h2>
       <div className="space-y-2.5">
-        {show.seasons.map((s) => (
-          <div
-            key={s.seasonNumber}
-            className="overflow-hidden rounded-2xl border border-line bg-surface/60"
-          >
-            <button
-              onClick={() => setOpen(open === s.seasonNumber ? null : s.seasonNumber)}
-              className="flex w-full items-center gap-3 p-3 text-left transition-colors active:bg-surface-2"
+        {show.seasons.map((s) => {
+          const watchedInSeason = [...watchedSet].filter((k) =>
+            k.startsWith(`S${s.seasonNumber}E`),
+          ).length
+          const complete = s.episodeCount > 0 && watchedInSeason >= s.episodeCount
+          const started = watchedInSeason > 0
+          return (
+            <div
+              key={s.seasonNumber}
+              className="overflow-hidden rounded-2xl border border-line bg-surface/60"
             >
-              <Poster path={s.posterPath} alt={s.name} size="w200" className="h-16 w-11" rounded="rounded-lg" />
-              <div className="flex-1">
-                <div className="font-medium">{s.name}</div>
-                <div className="text-xs text-faint">
-                  {s.episodeCount} episodes{s.airDate ? ` · ${s.airDate.slice(0, 4)}` : ''}
-                </div>
-              </div>
-              <span
-                className={`text-faint transition-transform ${open === s.seasonNumber ? 'rotate-90' : ''}`}
+              <button
+                onClick={() => setOpen(open === s.seasonNumber ? null : s.seasonNumber)}
+                className="flex w-full items-center gap-3 p-3 text-left transition-colors active:bg-surface-2"
               >
-                ›
-              </span>
-            </button>
-            {open === s.seasonNumber && <SeasonEpisodes show={show} seasonNumber={s.seasonNumber} />}
-          </div>
-        ))}
+                <Poster path={s.posterPath} alt={s.name} size="w200" className="h-16 w-11" rounded="rounded-lg" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{s.name}</div>
+                  <div className="text-xs text-faint">
+                    {s.episodeCount} episodes{s.airDate ? ` · ${s.airDate.slice(0, 4)}` : ''}
+                  </div>
+                  <SeasonStatus complete={complete} started={started} watched={watchedInSeason} total={s.episodeCount} />
+                </div>
+                <span
+                  className={`text-faint transition-transform ${open === s.seasonNumber ? 'rotate-90' : ''}`}
+                >
+                  ›
+                </span>
+              </button>
+              {open === s.seasonNumber && (
+                <SeasonEpisodes show={show} seasonNumber={s.seasonNumber} watchedSet={watchedSet} />
+              )}
+            </div>
+          )
+        })}
       </div>
     </section>
   )
 }
 
-function SeasonEpisodes({ show, seasonNumber }: { show: TitleDetailType; seasonNumber: number }) {
+function SeasonStatus({
+  complete,
+  started,
+  watched,
+  total,
+}: {
+  complete: boolean
+  started: boolean
+  watched: number
+  total: number
+}) {
+  if (complete) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-watched/15 px-1.5 py-0.5 text-[11px] font-medium text-watched">
+        ✓ Watched
+      </span>
+    )
+  }
+  if (started) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand/15 px-1.5 py-0.5 text-[11px] font-medium text-brand-2">
+        In progress · {watched}/{total}
+      </span>
+    )
+  }
+  return <span className="mt-1 inline-block text-[11px] text-faint">Not started</span>
+}
+
+function SeasonEpisodes({
+  show,
+  seasonNumber,
+  watchedSet,
+}: {
+  show: TitleDetailType
+  seasonNumber: number
+  watchedSet: Set<string>
+}) {
   const { session } = useAuth()
   const { data: episodes, isLoading } = useQuery({
     queryKey: ['season', show.id, seasonNumber],
     queryFn: () => getSeason(show.id, seasonNumber),
   })
-  const watches = useEpisodeWatches(show.id)
   const toggle = useToggleEpisode(show)
-  const watchedSet = watches.data ?? new Set<string>()
+  const toggleSeason = useToggleSeason(show)
 
   if (isLoading) return <p className="p-3 text-xs text-muted">Loading episodes…</p>
+  if (!episodes || episodes.length === 0)
+    return <p className="p-3 text-xs text-muted">No episodes listed.</p>
+
+  const epNumbers = episodes.map((e) => e.episodeNumber)
+  const allWatched = episodes.every((e) => watchedSet.has(`S${e.seasonNumber}E${e.episodeNumber}`))
 
   return (
-    <ul className="divide-y divide-line border-t border-line">
-      {episodes?.map((e) => {
-        const key = `S${e.seasonNumber}E${e.episodeNumber}`
-        const watched = watchedSet.has(key)
-        return (
-          <li key={key} className="flex items-center gap-3 p-3">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm">
-                <span className="text-faint">{e.episodeNumber}.</span> {e.name}
+    <div className="border-t border-line">
+      {session && (
+        <div className="flex justify-end p-2.5">
+          <button
+            onClick={() =>
+              toggleSeason.mutate({ season: seasonNumber, episodes: epNumbers, watched: allWatched })
+            }
+            disabled={toggleSeason.isPending}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition active:scale-[0.97] disabled:opacity-60 ${
+              allWatched ? 'border border-line bg-surface text-muted' : 'bg-brand-gradient text-white'
+            }`}
+          >
+            {toggleSeason.isPending ? '…' : allWatched ? 'Mark season unwatched' : '✓ Mark season watched'}
+          </button>
+        </div>
+      )}
+      <ul className="divide-y divide-line border-t border-line">
+        {episodes.map((e) => {
+          const key = `S${e.seasonNumber}E${e.episodeNumber}`
+          const watched = watchedSet.has(key)
+          return (
+            <li key={key} className="flex items-center gap-3 p-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm">
+                  <span className="text-faint">{e.episodeNumber}.</span> {e.name}
+                </div>
+                {e.airDate && <div className="text-[11px] text-faint">{e.airDate}</div>}
               </div>
-              {e.airDate && <div className="text-[11px] text-faint">{e.airDate}</div>}
-            </div>
-            <button
-              disabled={!session}
-              onClick={() => toggle.mutate({ season: e.seasonNumber, episode: e.episodeNumber, watched })}
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-semibold transition active:scale-90 disabled:opacity-40 ${
-                watched ? 'bg-watched text-bg' : 'border border-line bg-surface text-muted'
-              }`}
-              aria-label={watched ? 'Watched' : 'Mark watched'}
-            >
-              ✓
-            </button>
-          </li>
-        )
-      })}
-    </ul>
+              <button
+                disabled={!session}
+                onClick={() => toggle.mutate({ season: e.seasonNumber, episode: e.episodeNumber, watched })}
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-semibold transition active:scale-90 disabled:opacity-40 ${
+                  watched ? 'bg-watched text-bg' : 'border border-line bg-surface text-muted'
+                }`}
+                aria-label={watched ? 'Watched' : 'Mark watched'}
+              >
+                ✓
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }

@@ -143,6 +143,42 @@ export function useToggleEpisode(show: TitleDetail) {
   })
 }
 
+// Mark an entire season watched or unwatched in one shot.
+export function useToggleSeason(show: TitleDetail) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { season: number; episodes: number[]; watched: boolean }) => {
+      if (!supabase) throw new Error('Not configured')
+      if (args.episodes.length === 0) return
+      await cacheTitle(show)
+      if (args.watched) {
+        // Currently all watched → clear the whole season.
+        await supabase
+          .from('episode_watches')
+          .delete()
+          .eq('tmdb_show_id', show.id)
+          .eq('season_number', args.season)
+          .in('episode_number', args.episodes)
+      } else {
+        const rows = args.episodes.map((e) => ({
+          tmdb_show_id: show.id,
+          season_number: args.season,
+          episode_number: e,
+        }))
+        await supabase
+          .from('episode_watches')
+          .upsert(rows, { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' })
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['episode-watches'] })
+      qc.invalidateQueries({ queryKey: ['history'] })
+      qc.invalidateQueries({ queryKey: ['up-next'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
 // --- Ratings ----------------------------------------------------------------
 
 export function useRating(title: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath' | 'year'>) {

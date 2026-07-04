@@ -129,10 +129,48 @@ for (const r of showRatings) {
 
 const totalSeen = [...shows.values()].reduce((n, s) => n + s.seen, 0)
 
+// --- movies -----------------------------------------------------------------
+// TV Time has no dedicated movie CSV; movie activity lives in the unified
+// tracking-prod-records.csv, distinguished by entity_type='movie'. There is no
+// TMDB/external id — only a title and release_date — so movies are resolved by
+// name + year later. Row types we care about:
+//   watch   → you've watched it        → completed + a movie_watches row
+//   towatch → on your watchlist        → watchlist
+// (a 'follow' row is just the union of the two, so we ignore it.)
+const tracking = readCsv('tracking-prod-records.csv')
+const movieYear = (r) => (r.release_date || '').slice(0, 10).slice(0, 4) || null
+
+const watchedMovies = new Map() // "name|year" -> { name, year, watchedAt }
+const watchlistMovies = new Map()
+for (const r of tracking) {
+  if (r.entity_type !== 'movie' || !r.movie_name) continue
+  const year = movieYear(r)
+  const key = `${r.movie_name}|${year ?? ''}`
+  if (r.type === 'watch') {
+    if (!watchedMovies.has(key)) {
+      watchedMovies.set(key, {
+        name: r.movie_name,
+        year,
+        watchedAt: toIso(r.created_at) || toIso(r.updated_at) || null,
+      })
+    }
+  } else if (r.type === 'towatch') {
+    if (!watchlistMovies.has(key)) watchlistMovies.set(key, { name: r.movie_name, year })
+  }
+}
+// A movie you've watched is never also "to watch".
+for (const key of watchedMovies.keys()) watchlistMovies.delete(key)
+const allMovies = [
+  ...[...watchedMovies.values()].map((m) => ({ ...m, watched: true })),
+  ...[...watchlistMovies.values()].map((m) => ({ ...m, watched: false })),
+]
+
 console.log('\n📦 Parsed TV Time export:')
 console.log(`   Shows:                 ${shows.size}`)
 console.log(`   Episodes watched (Σ):  ${totalSeen}`)
 console.log(`   Show ratings:          ${ratingByTvdb.size}`)
+console.log(`   Movies watched:        ${watchedMovies.size}`)
+console.log(`   Movies to watch:       ${watchlistMovies.size}`)
 
 if (DRY_RUN) {
   console.log('\n(dry run — nothing written; statuses/episodes are computed live during a real run)')
@@ -141,6 +179,10 @@ if (DRY_RUN) {
     .slice(0, 10)
     .map((s) => `   • ${s.name} — ${s.seen} seen${s.followed ? '' : ' (not followed)'}`)
   console.log('\nMost-watched shows:\n' + sample.join('\n'))
+  const movieSample = allMovies
+    .slice(0, 10)
+    .map((m) => `   • ${m.name}${m.year ? ` (${m.year})` : ''} — ${m.watched ? 'watched' : 'watchlist'}`)
+  console.log('\nMovies (sample):\n' + movieSample.join('\n'))
   process.exit(0)
 }
 
@@ -153,6 +195,8 @@ if (!PROXY_URL || !ANON_KEY) {
 
 const mapPath = path.join(exportDir, 'tmdb-id-map.json')
 const idMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {}
+const movieMapPath = path.join(exportDir, 'tmdb-movie-map.json')
+const movieMap = fs.existsSync(movieMapPath) ? JSON.parse(fs.readFileSync(movieMapPath, 'utf8')) : {}
 const authHeaders = { apikey: ANON_KEY, authorization: `Bearer ${ANON_KEY}` }
 
 const getJson = (url) => fetch(url, { headers: authHeaders }).then((r) => r.json())
@@ -205,6 +249,34 @@ async function resolveShow(tvdbId, name) {
     idMap[tvdbId] = null
   }
   return idMap[tvdbId]
+}
+
+// Resolve a movie to a TMDB id by title (+ year hint) via search/multi. Movies
+// in the export carry no external id, so this is a best-effort name match.
+async function resolveMovie(name, year) {
+  const key = `${name}|${year ?? ''}`
+  if (movieMap[key] !== undefined) return movieMap[key] // cached (incl. null misses)
+  try {
+    const search = await getJson(
+      `${PROXY_URL}/search/multi?query=${encodeURIComponent(name)}&include_adult=false`,
+    )
+    const results = (search.results ?? []).filter((r) => r.media_type === 'movie')
+    if (results.length === 0) {
+      movieMap[key] = null
+      return null
+    }
+    const byYear = year && results.find((r) => (r.release_date || '').startsWith(year))
+    const pick = byYear || results[0]
+    movieMap[key] = {
+      id: pick.id,
+      name: pick.title || pick.original_title || name,
+      poster_path: pick.poster_path ?? null,
+      year: (pick.release_date || '').slice(0, 4) || year || null,
+    }
+  } catch {
+    movieMap[key] = null
+  }
+  return movieMap[key]
 }
 
 async function pool(items, size, fn) {
@@ -269,8 +341,8 @@ console.log('✓ Signed in\n')
 // --- optional reset ---------------------------------------------------------
 
 if (RESET) {
-  console.log('🧹 Clearing existing follows / episode_watches / ratings…')
-  for (const t of ['episode_watches', 'follows', 'ratings']) {
+  console.log('🧹 Clearing existing follows / episode_watches / movie_watches / ratings…')
+  for (const t of ['episode_watches', 'movie_watches', 'follows', 'ratings']) {
     const { error } = await supabase.from(t).delete().gte('id', 0)
     if (error) throw new Error(`reset ${t}: ${error.message}`)
   }
@@ -282,14 +354,23 @@ console.log('🔗 Resolving shows on TMDB (id + episode structure)…')
 await pool([...shows.values()], 8, (s) => resolveShow(s.tvdbId, s.name))
 fs.writeFileSync(mapPath, JSON.stringify(idMap, null, 2))
 
+if (allMovies.length) {
+  console.log('🎬 Resolving movies on TMDB (by title + year)…')
+  await pool(allMovies, 8, (m) => resolveMovie(m.name, m.year))
+  fs.writeFileSync(movieMapPath, JSON.stringify(movieMap, null, 2))
+}
+
 // --- build rows -------------------------------------------------------------
 
 const titleRows = []
 const followRows = []
 const episodeRows = []
 const ratingRows = []
+const movieWatchRows = []
 let mapped = 0
 let skippedUnstarted = 0
+let moviesMapped = 0
+let moviesUnresolved = 0
 
 for (const s of shows.values()) {
   const meta = idMap[s.tvdbId]
@@ -332,7 +413,40 @@ for (const s of shows.values()) {
   if (score) ratingRows.push({ tmdb_id: meta.id, media_type: 'tv', score })
 }
 
-console.log(`   ${mapped} shows mapped, ${skippedUnstarted} unstarted skipped\n`)
+console.log(`   ${mapped} shows mapped, ${skippedUnstarted} unstarted skipped`)
+
+for (const m of allMovies) {
+  const meta = movieMap[`${m.name}|${m.year ?? ''}`]
+  if (!meta) {
+    moviesUnresolved++
+    continue
+  }
+  moviesMapped++
+
+  titleRows.push({
+    tmdb_id: meta.id,
+    media_type: 'movie',
+    name: meta.name,
+    poster_path: meta.poster_path,
+    release_year: meta.year ? Number(meta.year) : null,
+  })
+  followRows.push({
+    tmdb_id: meta.id,
+    media_type: 'movie',
+    status: m.watched ? 'completed' : 'watchlist',
+    name: meta.name,
+    poster_path: meta.poster_path,
+    updated_at: new Date().toISOString(),
+  })
+  if (m.watched) {
+    movieWatchRows.push({
+      tmdb_movie_id: meta.id,
+      watched_at: m.watchedAt || new Date().toISOString(),
+    })
+  }
+}
+
+console.log(`   ${moviesMapped} movies mapped, ${moviesUnresolved} unresolved\n`)
 
 // --- upsert -----------------------------------------------------------------
 
@@ -372,10 +486,37 @@ await upsertAll('follows', dedupe(followRows, byTitle), 'user_id,tmdb_id,media_t
 await upsertAll('episode_watches', dedupe(episodeRows, byEpisode), 'user_id,tmdb_show_id,season_number,episode_number')
 if (ratingRows.length) await upsertAll('ratings', dedupe(ratingRows, byTitle), 'user_id,tmdb_id,media_type')
 
-const completed = followRows.filter((f) => f.status === 'completed').length
-const watching = followRows.filter((f) => f.status === 'watching').length
-const watchlist = followRows.filter((f) => f.status === 'watchlist').length
+// movie_watches has no unique key, so upsert can't dedupe. Collapse to one row
+// per movie, clear any prior imports for those ids, then insert — idempotent.
+if (movieWatchRows.length) {
+  const uniqueWatches = dedupe(movieWatchRows, (r) => r.tmdb_movie_id)
+  const ids = uniqueWatches.map((r) => r.tmdb_movie_id)
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await supabase
+      .from('movie_watches')
+      .delete()
+      .in('tmdb_movie_id', ids.slice(i, i + 200))
+    if (error) throw new Error(`movie_watches clear: ${error.message}`)
+  }
+  for (let i = 0; i < uniqueWatches.length; i += 500) {
+    const { error } = await supabase.from('movie_watches').insert(uniqueWatches.slice(i, i + 500))
+    if (error) throw new Error(`movie_watches: ${error.message}`)
+    process.stdout.write(
+      `\r   movie_watches: ${Math.min(i + 500, uniqueWatches.length)}/${uniqueWatches.length}          `,
+    )
+  }
+  process.stdout.write(`\r   movie_watches: ${uniqueWatches.length}/${uniqueWatches.length} ✓          \n`)
+}
+
+const tvFollows = followRows.filter((f) => f.media_type === 'tv')
+const movieFollows = followRows.filter((f) => f.media_type === 'movie')
+const by = (rows, s) => rows.filter((f) => f.status === s).length
 console.log('\n✅ Import complete!')
-console.log(`   ${followRows.length} shows  (${watching} watching · ${completed} completed · ${watchlist} watchlist)`)
-console.log(`   ${episodeRows.length} episodes · ${ratingRows.length} ratings`)
+console.log(
+  `   ${tvFollows.length} shows  (${by(tvFollows, 'watching')} watching · ${by(tvFollows, 'completed')} completed · ${by(tvFollows, 'watchlist')} watchlist)`,
+)
+console.log(
+  `   ${movieFollows.length} movies (${by(movieFollows, 'completed')} watched · ${by(movieFollows, 'watchlist')} watchlist)`,
+)
+console.log(`   ${episodeRows.length} episodes · ${movieWatchRows.length} movie watches · ${ratingRows.length} ratings`)
 process.exit(0)
