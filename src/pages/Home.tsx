@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -16,8 +17,11 @@ interface FollowRow {
   poster_path: string | null
 }
 
+type MediaFilter = 'all' | 'tv' | 'movie'
+
 export function Home() {
   const { session, loading } = useAuth()
+  const [filter, setFilter] = useState<MediaFilter>('all')
 
   const { data: follows } = useQuery({
     queryKey: ['follows'],
@@ -65,9 +69,13 @@ export function Home() {
     )
   }
 
-  const watching = follows?.filter((f) => f.status === 'watching') ?? []
-  const watchlist = follows?.filter((f) => f.status === 'watchlist') ?? []
-  const completed = follows?.filter((f) => f.status === 'completed') ?? []
+  const active = follows?.filter((f) => f.status === 'watching' || f.status === 'watchlist') ?? []
+  const shows = active.filter((f) => f.media_type === 'tv')
+  const movies = active.filter((f) => f.media_type === 'movie')
+
+  const inFilter = (f: FollowRow) => filter === 'all' || f.media_type === filter
+  const watching = active.filter((f) => f.status === 'watching' && inFilter(f))
+  const watchlist = active.filter((f) => f.status === 'watchlist' && inFilter(f))
 
   return (
     <div className="px-5 pt-14">
@@ -91,18 +99,33 @@ export function Home() {
         </Link>
       </div>
 
-      {follows && follows.length > 0 && (
-        <div className="mb-7 grid grid-cols-3 gap-3">
-          <Stat label="Watching" value={watching.length} />
-          <Stat label="Watchlist" value={watchlist.length} />
-          <Stat label="Completed" value={completed.length} />
+      {active.length > 0 && (
+        <div className="mb-6 grid grid-cols-3 gap-3">
+          <Stat label="Watching" value={active.filter((f) => f.status === 'watching').length} />
+          <Stat label="Shows" value={shows.length} />
+          <Stat label="Movies" value={movies.length} />
         </div>
       )}
 
       <UpNextRail />
+
+      {active.length > 0 && (
+        <MediaTabs
+          filter={filter}
+          onChange={setFilter}
+          showCount={shows.length}
+          movieCount={movies.length}
+        />
+      )}
+
       <Shelf title="Continue watching" rows={watching} />
       <Shelf title="Watchlist" rows={watchlist} />
-      <Shelf title="Completed" rows={completed} />
+
+      {active.length > 0 && watching.length === 0 && watchlist.length === 0 && (
+        <p className="mb-7 rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
+          Nothing here in {filter === 'tv' ? 'TV shows' : 'movies'} yet.
+        </p>
+      )}
 
       {follows?.length === 0 && (
         <div className="my-7 rounded-3xl border border-line bg-surface/60 p-8 text-center">
@@ -119,6 +142,39 @@ export function Home() {
       )}
 
       <PosterRail title="Trending this week" items={trending ?? []} />
+    </div>
+  )
+}
+
+function MediaTabs({
+  filter,
+  onChange,
+  showCount,
+  movieCount,
+}: {
+  filter: MediaFilter
+  onChange: (f: MediaFilter) => void
+  showCount: number
+  movieCount: number
+}) {
+  const tabs: { key: MediaFilter; label: string }[] = [
+    { key: 'all', label: `All ${showCount + movieCount}` },
+    { key: 'tv', label: `📺 Shows ${showCount}` },
+    { key: 'movie', label: `🎬 Movies ${movieCount}` },
+  ]
+  return (
+    <div className="mb-5 flex gap-1 rounded-2xl border border-line bg-surface/60 p-1">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition active:scale-[0.97] ${
+            filter === t.key ? 'bg-brand-gradient text-white shadow-lg shadow-brand/25' : 'text-muted'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   )
 }
