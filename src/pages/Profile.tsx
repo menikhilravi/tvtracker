@@ -2,8 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
-import { useLibrary, useStats, type LibraryCategory, type LibraryItem } from '../lib/tracking'
+import {
+  useLibrary,
+  useRemoveFollow,
+  useStats,
+  type LibraryCategory,
+  type LibraryItem,
+} from '../lib/tracking'
 import { Poster } from '../components/Poster'
+import { usePersistedState, useScrollMemory } from '../lib/uiState'
 
 export function Profile() {
   const { session, signInWithPassword, signOut } = useAuth()
@@ -204,7 +211,7 @@ function countsFor(items: LibraryItem[]): Record<LibraryCategory, number> {
 
 function LibrarySection() {
   const { items, isLoading, refining } = useLibrary()
-  const [open, setOpen] = useState<MediaKind | null>(null)
+  const [open, setOpen] = usePersistedState<MediaKind | null>('lib:open', null)
 
   const tv = items.filter((i) => i.media_type === 'tv')
   const movies = items.filter((i) => i.media_type === 'movie')
@@ -230,6 +237,7 @@ function LibrarySection() {
 
       {open && (
         <LibraryModal
+          storageKey={open}
           title={open === 'tv' ? 'TV Shows' : 'Movies'}
           icon={open === 'tv' ? '📺' : '🎬'}
           items={openItems}
@@ -279,19 +287,25 @@ function LibraryCard({
 }
 
 function LibraryModal({
+  storageKey,
   title,
   icon,
   items,
   onClose,
 }: {
+  storageKey: MediaKind
   title: string
   icon: string
   items: LibraryItem[]
   onClose: () => void
 }) {
-  const [filter, setFilter] = useState<Filter>('all')
-  const [sort, setSort] = useState<SortKey>('recent')
-  const [search, setSearch] = useState('')
+  // Filter / sort / search persist per media kind so back-navigation restores them.
+  const [filter, setFilter] = usePersistedState<Filter>(`lib:${storageKey}:filter`, 'all')
+  const [sort, setSort] = usePersistedState<SortKey>(`lib:${storageKey}:sort`, 'recent')
+  const [search, setSearch] = usePersistedState<string>(`lib:${storageKey}:search`, '')
+  const [editing, setEditing] = useState(false)
+  const remove = useRemoveFollow()
+  const scrollRef = useScrollMemory<HTMLDivElement>(`lib:${storageKey}:scroll`)
 
   // Close on Escape and lock background scroll while open.
   useEffect(() => {
@@ -324,16 +338,26 @@ function LibraryModal({
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">
       {/* Sticky header: title, search, filters. */}
       <div className="border-b border-line px-5 pb-3 pt-12">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold tracking-tight">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="min-w-0 truncate text-lg font-bold tracking-tight">
             {icon} {title} <span className="text-sm font-normal text-faint">{items.length}</span>
           </h2>
-          <button
-            onClick={onClose}
-            className="rounded-full border border-line bg-surface px-4 py-1.5 text-sm font-semibold active:scale-95"
-          >
-            Done
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => setEditing((v) => !v)}
+              className={`rounded-full border px-3.5 py-1.5 text-sm font-semibold active:scale-95 ${
+                editing ? 'border-transparent bg-brand-gradient text-white' : 'border-line bg-surface'
+              }`}
+            >
+              {editing ? 'Done editing' : 'Edit'}
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-full border border-line bg-surface px-4 py-1.5 text-sm font-semibold active:scale-95"
+            >
+              Done
+            </button>
+          </div>
         </div>
 
         <div className="relative mt-3">
@@ -341,7 +365,6 @@ function LibraryModal({
             🔍
           </span>
           <input
-            autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={`Search ${title.toLowerCase()}`}
@@ -371,9 +394,11 @@ function LibraryModal({
       </div>
 
       {/* Scrollable results. */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-xs text-faint">{shown.length} shown</span>
+          <span className="text-xs text-faint">
+            {editing ? 'Tap ✕ to remove' : `${shown.length} shown`}
+          </span>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
@@ -393,23 +418,43 @@ function LibraryModal({
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-3 pb-6">
-            {shown.map((r) => (
-              <Link
-                key={`${r.media_type}-${r.tmdb_id}`}
-                to={`/title/${r.media_type}/${r.tmdb_id}`}
-                onClick={onClose}
-                className="active:scale-[0.97]"
-              >
-                <Poster
-                  path={r.poster_path}
-                  alt={r.name ?? ''}
-                  size="w342"
-                  className="aspect-[2/3] w-full shadow-lg shadow-black/40"
-                />
-                <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
-                <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
-              </Link>
-            ))}
+            {shown.map((r) =>
+              editing ? (
+                <div key={`${r.media_type}-${r.tmdb_id}`} className="relative">
+                  <Poster
+                    path={r.poster_path}
+                    alt={r.name ?? ''}
+                    size="w342"
+                    className="aspect-[2/3] w-full opacity-60 shadow-lg shadow-black/40"
+                  />
+                  <button
+                    onClick={() => remove.mutate({ tmdbId: r.tmdb_id, mediaType: r.media_type })}
+                    disabled={remove.isPending}
+                    aria-label={`Remove ${r.name ?? 'title'}`}
+                    className="absolute right-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-full bg-red-500 text-sm font-bold text-white shadow-lg active:scale-90 disabled:opacity-50"
+                  >
+                    ✕
+                  </button>
+                  <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+                  <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
+                </div>
+              ) : (
+                <Link
+                  key={`${r.media_type}-${r.tmdb_id}`}
+                  to={`/title/${r.media_type}/${r.tmdb_id}`}
+                  className="active:scale-[0.97]"
+                >
+                  <Poster
+                    path={r.poster_path}
+                    alt={r.name ?? ''}
+                    size="w342"
+                    className="aspect-[2/3] w-full shadow-lg shadow-black/40"
+                  />
+                  <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+                  <p className="truncate text-[11px] text-faint">{CATEGORY_LABEL[r.category]}</p>
+                </Link>
+              ),
+            )}
           </div>
         )}
       </div>

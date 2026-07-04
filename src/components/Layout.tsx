@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, ScrollRestoration } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
 function Icon({ path, filled }: { path: ReactNode; filled?: boolean }) {
@@ -66,6 +66,7 @@ export function Layout() {
       <main className="flex-1 pb-28">
         <Outlet />
       </main>
+      <ScrollRestoration />
 
       <nav
         className="glass fixed inset-x-0 bottom-0 z-20 border-t"

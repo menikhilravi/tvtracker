@@ -1,9 +1,9 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
 import { UpNextRail } from '../components/UpNext'
 import { useFollows, type FollowRow } from '../lib/tracking'
+import { usePersistedState } from '../lib/uiState'
 
 type MediaTab = 'tv' | 'movie'
 type SortKey = 'recent' | 'title'
@@ -21,8 +21,8 @@ function sortRows(rows: FollowRow[], sort: SortKey) {
 
 export function Home() {
   const { session, loading } = useAuth()
-  const [tab, setTab] = useState<MediaTab>('tv')
-  const [sort, setSort] = useState<SortKey>('recent')
+  const [tab, setTab] = usePersistedState<MediaTab>('home:tab', 'tv')
+  const [sort, setSort] = usePersistedState<SortKey>('home:sort', 'recent')
 
   const { data: follows } = useFollows()
 

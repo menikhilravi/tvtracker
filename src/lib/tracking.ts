@@ -83,6 +83,26 @@ export function useFollow(
   return { status: query.data ?? null, isLoading: query.isLoading, setStatus, enabled }
 }
 
+// Remove a title from the library entirely (deletes the follow row). Watch
+// history is left intact. Works from list views without the per-title hook.
+export function useRemoveFollow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { tmdbId: number; mediaType: MediaType }) => {
+      if (!supabase) throw new Error('Not configured')
+      await supabase
+        .from('follows')
+        .delete()
+        .eq('tmdb_id', args.tmdbId)
+        .eq('media_type', args.mediaType)
+    },
+    onSuccess: (_data, args) => {
+      qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['follow', args.tmdbId, args.mediaType] })
+    },
+  })
+}
+
 export function useMarkMovieWatched(title: TitleDetail) {
   const qc = useQueryClient()
   return useMutation({
