@@ -2,7 +2,7 @@
 // directly — the key stays on the server). All functions return normalized
 // shapes from `types.ts` so components never touch raw TMDB JSON.
 
-import type { Episode, MediaType, SearchResult, Season, TitleDetail } from './types'
+import type { Episode, EpisodeRef, MediaType, SearchResult, Season, TitleDetail } from './types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -88,7 +88,26 @@ interface RawDetail {
   credits?: {
     cast?: { name: string; character?: string; profile_path?: string | null }[]
   }
+  last_episode_to_air?: RawEpisodeRef | null
+  next_episode_to_air?: RawEpisodeRef | null
 }
+
+interface RawEpisodeRef {
+  season_number: number
+  episode_number: number
+  name?: string | null
+  air_date?: string | null
+}
+
+const episodeRef = (e?: RawEpisodeRef | null): EpisodeRef | null =>
+  e
+    ? {
+        seasonNumber: e.season_number,
+        episodeNumber: e.episode_number,
+        name: e.name ?? null,
+        airDate: e.air_date ?? null,
+      }
+    : null
 
 export async function getTitle(mediaType: MediaType, id: number): Promise<TitleDetail> {
   const data = await proxy<RawDetail>(`${mediaType}/${id}`, {
@@ -120,6 +139,8 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
       character: c.character ?? '',
       profilePath: c.profile_path ?? null,
     })),
+    lastEpisodeToAir: episodeRef(data.last_episode_to_air),
+    nextEpisodeToAir: episodeRef(data.next_episode_to_air),
   }
 }
 
@@ -146,4 +167,20 @@ export async function getSeason(showId: number, seasonNumber: number): Promise<E
     airDate: e.air_date ?? null,
     stillPath: e.still_path ?? null,
   }))
+}
+
+// --- Trending (discovery) ---------------------------------------------------
+
+export async function getTrending(window: 'day' | 'week' = 'week'): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`trending/all/${window}`)
+  return data.results
+    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
+    .map((r) => ({
+      id: r.id,
+      media_type: r.media_type as MediaType,
+      title: r.title ?? r.name ?? 'Untitled',
+      posterPath: r.poster_path ?? null,
+      year: year(r.release_date ?? r.first_air_date),
+      overview: r.overview ?? '',
+    }))
 }

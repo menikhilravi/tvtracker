@@ -26,6 +26,14 @@ export interface Episode {
   stillPath: string | null
 }
 
+// A minimal episode reference used for "up next" and the upcoming calendar.
+export interface EpisodeRef {
+  seasonNumber: number
+  episodeNumber: number
+  name: string | null
+  airDate: string | null
+}
+
 export interface TitleDetail {
   id: number
   media_type: MediaType
@@ -39,4 +47,7 @@ export interface TitleDetail {
   runtime: number | null // minutes (movies)
   seasons: Season[] // tv only
   cast: { name: string; character: string; profilePath: string | null }[]
+  // tv only: the most recently aired and next scheduled episodes (from TMDB).
+  lastEpisodeToAir: EpisodeRef | null
+  nextEpisodeToAir: EpisodeRef | null
 }

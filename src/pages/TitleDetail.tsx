@@ -4,12 +4,14 @@ import { useQuery } from '@tanstack/react-query'
 import { getTitle, getSeason, IMG } from '../lib/tmdb'
 import type { MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
+import { RatingStars } from '../components/RatingStars'
 import { useAuth } from '../lib/auth'
 import {
   useFollow,
   useMarkMovieWatched,
   useEpisodeWatches,
   useToggleEpisode,
+  useRating,
   type FollowStatus,
 } from '../lib/tracking'
 
@@ -97,6 +99,8 @@ export function TitleDetail() {
         )}
 
         <TrackingBar title={title} />
+
+        <RatingSection title={title} />
 
         {title.overview && (
           <p className="mt-5 text-sm leading-relaxed text-ink/80">{title.overview}</p>
@@ -197,6 +201,72 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
           }`}
         >
           {justLogged ? '✓ Logged' : '👁'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function RatingSection({ title }: { title: TitleDetailType }) {
+  const { rating, save, enabled } = useRating(title)
+  const [review, setReview] = useState('')
+  const [editingReview, setEditingReview] = useState(false)
+
+  if (!enabled) return null
+
+  const startReview = () => {
+    setReview(rating?.review ?? '')
+    setEditingReview(true)
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-line bg-surface/60 p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-muted">Your rating</span>
+        <RatingStars
+          score={rating?.score ?? null}
+          onChange={(score) => save.mutate({ score, review: rating?.review })}
+        />
+      </div>
+
+      {editingReview ? (
+        <div className="mt-3">
+          <textarea
+            value={review}
+            onChange={(e) => setReview(e.target.value)}
+            rows={3}
+            placeholder="Write a note or review…"
+            className="w-full rounded-xl border border-line bg-bg/60 px-3 py-2 text-sm outline-none focus:border-brand/60"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() =>
+                save.mutate(
+                  { score: rating?.score ?? null, review },
+                  { onSuccess: () => setEditingReview(false) },
+                )
+              }
+              className="rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setEditingReview(false)}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : rating?.review ? (
+        <button onClick={startReview} className="mt-3 block w-full text-left text-sm text-ink/80">
+          <span className="text-faint">“</span>
+          {rating.review}
+          <span className="text-faint">”</span>
+        </button>
+      ) : (
+        <button onClick={startReview} className="mt-3 text-xs text-brand">
+          + Add a review
         </button>
       )}
     </div>

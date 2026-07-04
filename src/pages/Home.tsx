@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
+import { UpNextRail } from '../components/UpNext'
+import { PosterRail } from '../components/PosterRail'
+import { getTrending } from '../lib/tmdb'
 import type { MediaType } from '../lib/types'
 
 interface FollowRow {
@@ -27,6 +30,11 @@ export function Home() {
       if (error) throw error
       return data as FollowRow[]
     },
+  })
+
+  const { data: trending } = useQuery({
+    queryKey: ['trending', 'week'],
+    queryFn: () => getTrending('week'),
   })
 
   if (loading) {
@@ -68,6 +76,21 @@ export function Home() {
         <h1 className="text-3xl font-bold tracking-tight">Your library</h1>
       </header>
 
+      <div className="mb-7 grid grid-cols-2 gap-3">
+        <Link
+          to="/calendar"
+          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
+        >
+          🗓️ Upcoming
+        </Link>
+        <Link
+          to="/history"
+          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
+        >
+          🕑 History
+        </Link>
+      </div>
+
       {follows && follows.length > 0 && (
         <div className="mb-7 grid grid-cols-3 gap-3">
           <Stat label="Watching" value={watching.length} />
@@ -76,12 +99,13 @@ export function Home() {
         </div>
       )}
 
+      <UpNextRail />
       <Shelf title="Continue watching" rows={watching} />
       <Shelf title="Watchlist" rows={watchlist} />
       <Shelf title="Completed" rows={completed} />
 
       {follows?.length === 0 && (
-        <div className="mt-10 rounded-3xl border border-line bg-surface/60 p-8 text-center">
+        <div className="my-7 rounded-3xl border border-line bg-surface/60 p-8 text-center">
           <div className="text-4xl">🍿</div>
           <p className="mt-3 font-medium">Nothing tracked yet</p>
           <p className="mt-1 text-sm text-muted">Find a show or movie to get started.</p>
@@ -93,6 +117,8 @@ export function Home() {
           </Link>
         </div>
       )}
+
+      <PosterRail title="Trending this week" items={trending ?? []} />
     </div>
   )
 }

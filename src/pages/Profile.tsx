@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
+import { useStats } from '../lib/tracking'
 
 export function Profile() {
   const { session, signInWithPassword, signOut } = useAuth()
@@ -37,6 +39,16 @@ export function Profile() {
             <p className="truncate font-medium">{email}</p>
           </div>
         </div>
+        <StatsSection />
+
+        <Link
+          to="/history"
+          className="mt-4 flex items-center justify-between rounded-2xl border border-line bg-surface/60 px-5 py-3.5 font-medium active:scale-[0.98]"
+        >
+          <span>🕑 Watch history</span>
+          <span className="text-faint">›</span>
+        </Link>
+
         <button
           onClick={() => signOut()}
           className="mt-4 w-full rounded-2xl border border-line bg-surface py-3 font-semibold active:scale-[0.98]"
@@ -100,6 +112,36 @@ export function Profile() {
         Authentication → Users → Add user (set a password and auto-confirm), then
         sign in here.
       </p>
+    </div>
+  )
+}
+
+function StatsSection() {
+  const { data: stats } = useStats()
+  if (!stats) return null
+
+  const hours = Math.round(stats.estimatedMinutes / 60)
+  const timeLabel = hours >= 48 ? `${Math.round(hours / 24)}d` : `${hours}h`
+
+  const tiles = [
+    { label: 'Episodes', value: stats.episodesWatched },
+    { label: 'Movies', value: stats.moviesWatched },
+    { label: 'Completed', value: stats.completed },
+    { label: 'Time', value: timeLabel },
+  ]
+
+  return (
+    <div className="mt-6">
+      <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Your stats</h2>
+      <div className="grid grid-cols-2 gap-3">
+        {tiles.map((t) => (
+          <div key={t.label} className="rounded-2xl border border-line bg-surface/60 px-4 py-4">
+            <div className="text-2xl font-bold tracking-tight">{t.value}</div>
+            <div className="mt-0.5 text-[11px] uppercase tracking-wide text-faint">{t.label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-faint">Time watched is estimated.</p>
     </div>
   )
 }

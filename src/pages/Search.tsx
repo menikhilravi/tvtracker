@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { searchMulti } from '../lib/tmdb'
+import { searchMulti, getTrending } from '../lib/tmdb'
 import { Poster } from '../components/Poster'
+import { PosterRail } from '../components/PosterRail'
 
 export function Search() {
   const [input, setInput] = useState('')
@@ -18,6 +19,12 @@ export function Search() {
     queryKey: ['search', query],
     queryFn: () => searchMulti(query),
     enabled: query.length > 1,
+  })
+
+  const { data: trending } = useQuery({
+    queryKey: ['trending', 'week'],
+    queryFn: () => getTrending('week'),
+    enabled: query.length <= 1,
   })
 
   return (
@@ -85,10 +92,9 @@ export function Search() {
           ))}
         </ul>
 
-        {query.length <= 1 && !isFetching && (
-          <div className="mt-24 text-center text-sm text-faint">
-            <div className="text-4xl">🔎</div>
-            <p className="mt-3">Search for something to track.</p>
+        {query.length <= 1 && (
+          <div className="pt-2">
+            <PosterRail title="Trending this week" items={trending ?? []} />
           </div>
         )}
 
