@@ -7,6 +7,7 @@ import type {
   Episode,
   EpisodeRef,
   MediaType,
+  Person,
   RegionProviders,
   SearchResult,
   Season,
@@ -129,7 +130,7 @@ interface RawDetail {
     air_date?: string | null
   }[]
   credits?: {
-    cast?: { name: string; character?: string; profile_path?: string | null }[]
+    cast?: { id: number; name: string; character?: string; profile_path?: string | null }[]
   }
   last_episode_to_air?: RawEpisodeRef | null
   next_episode_to_air?: RawEpisodeRef | null
@@ -226,6 +227,7 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     networks: (data.networks ?? []).map((n) => n.name),
     seasons,
     cast: (data.credits?.cast ?? []).slice(0, 12).map((c) => ({
+      id: c.id,
       name: c.name,
       character: c.character ?? '',
       profilePath: c.profile_path ?? null,
@@ -254,6 +256,41 @@ export async function getCollection(id: number): Promise<Collection> {
     (a.year ?? '9999').localeCompare(b.year ?? '9999'),
   )
   return { id: data.id, name: data.name, parts }
+}
+
+// --- People (actors) --------------------------------------------------------
+
+// An actor plus their filmography. `combined_credits` merges movie + TV roles;
+// we sort by TMDB popularity so the titles they're best known for lead, and
+// dedupe because a person can hold several roles in the same title.
+export async function getPerson(id: number): Promise<Person> {
+  const data = await proxy<{
+    id: number
+    name: string
+    profile_path?: string | null
+    known_for_department?: string
+    combined_credits?: { cast?: (RawMultiItem & { popularity?: number })[] }
+  }>(`person/${id}`, { append_to_response: 'combined_credits' })
+
+  const ranked = (data.combined_credits?.cast ?? [])
+    .slice()
+    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+
+  const seen = new Set<string>()
+  const credits = toResults(ranked).filter((r) => {
+    const k = `${r.media_type}-${r.id}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+
+  return {
+    id: data.id,
+    name: data.name,
+    profilePath: data.profile_path ?? null,
+    knownFor: data.known_for_department ?? null,
+    credits,
+  }
 }
 
 // --- Season episodes --------------------------------------------------------

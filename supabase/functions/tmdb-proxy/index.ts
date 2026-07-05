@@ -29,6 +29,8 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^(movie|tv)\/\d+\/recommendations$/, params: ['page'] },
   // A movie franchise/collection and its parts (belongs_to_collection).
   { pattern: /^collection\/\d+$/, params: [] },
+  // A person (actor) plus their combined movie+TV filmography.
+  { pattern: /^person\/\d+$/, params: ['append_to_response'] },
   // Genre browsing: the genre list, then discover filtered by genre.
   { pattern: /^genre\/(movie|tv)\/list$/, params: [] },
   {

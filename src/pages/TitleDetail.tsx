@@ -126,7 +126,11 @@ export function TitleDetail() {
             <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Cast</h2>
             <div className="no-scrollbar -mx-5 flex gap-4 overflow-x-auto px-5 pb-1">
               {title.cast.map((c) => (
-                <div key={c.name} className="w-16 shrink-0 text-center">
+                <Link
+                  key={c.id}
+                  to={`/person/${c.id}`}
+                  className="w-16 shrink-0 text-center active:scale-[0.97]"
+                >
                   <Poster
                     path={c.profilePath}
                     alt={c.name}
@@ -136,7 +140,7 @@ export function TitleDetail() {
                   />
                   <p className="mt-1.5 truncate text-[11px] font-medium">{c.name}</p>
                   <p className="truncate text-[10px] text-faint">{c.character}</p>
-                </div>
+                </Link>
               ))}
             </div>
           </section>

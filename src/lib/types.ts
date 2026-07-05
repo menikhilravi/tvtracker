@@ -35,6 +35,16 @@ export interface EpisodeRef {
   airDate: string | null
 }
 
+// An actor and their combined movie+TV filmography, for the person page you
+// reach by tapping a cast member.
+export interface Person {
+  id: number
+  name: string
+  profilePath: string | null
+  knownFor: string | null // TMDB "known_for_department", e.g. "Acting"
+  credits: SearchResult[] // titles they appear in, most popular first
+}
+
 // A movie franchise (TMDB "belongs_to_collection") and its member movies.
 export interface Collection {
   id: number
@@ -75,7 +85,7 @@ export interface TitleDetail {
   numberOfEpisodes: number | null // tv only: total episodes across the series
   networks: string[] // tv only: e.g. HBO, Netflix
   seasons: Season[] // tv only
-  cast: { name: string; character: string; profilePath: string | null }[]
+  cast: { id: number; name: string; character: string; profilePath: string | null }[]
   // tv only: the most recently aired and next scheduled episodes (from TMDB).
   lastEpisodeToAir: EpisodeRef | null
   nextEpisodeToAir: EpisodeRef | null
