@@ -6,9 +6,29 @@ import type { MediaType, SearchResult } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { DiscoverRails } from '../components/DiscoverRails'
 import { ProviderBadge } from '../components/ProviderBadge'
+import { trackedKey } from '../components/PosterRail'
+import { useFollows, type FollowStatus } from '../lib/tracking'
 import { useWatchRegion } from '../lib/region'
 
 type TypeFilter = 'all' | MediaType
+
+// A compact pill shown on a search result when it's already in your library.
+const STATUS_BADGE: Record<FollowStatus, { label: string; className: string }> = {
+  completed: { label: '✓ Seen', className: 'bg-watched/20 text-watched' },
+  watching: { label: '👁 Watching', className: 'bg-brand/20 text-brand-2' },
+  watchlist: { label: '🔖 Watchlist', className: 'bg-surface-2 text-muted' },
+  dropped: { label: '⏹ Stopped', className: 'bg-surface-2 text-faint' },
+}
+
+function StatusBadge({ status }: { status: FollowStatus | undefined }) {
+  if (!status) return null
+  const { label, className } = STATUS_BADGE[status]
+  return (
+    <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${className}`}>
+      {label}
+    </span>
+  )
+}
 
 const decadeOf = (year: string | null) =>
   year ? String(Math.floor(Number(year) / 10) * 10) : null
@@ -17,6 +37,14 @@ export function Search() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [region] = useWatchRegion()
+
+  // Look up each result's library status (Seen / Watching / Watchlist).
+  const { data: follows } = useFollows()
+  const statusByKey = useMemo(() => {
+    const m = new Map<string, FollowStatus>()
+    for (const f of follows ?? []) m.set(trackedKey(f.media_type, f.tmdb_id), f.status)
+    return m
+  }, [follows])
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [genre, setGenre] = useState('')
@@ -205,6 +233,7 @@ export function Search() {
                     <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
                       {r.media_type === 'tv' ? 'TV' : 'Film'}
                     </span>
+                    <StatusBadge status={statusByKey.get(trackedKey(r.media_type, r.id))} />
                   </div>
                   <div className="flex items-center gap-2 text-xs text-faint">
                     <span>{r.year ?? '—'}</span>
