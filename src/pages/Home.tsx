@@ -6,6 +6,7 @@ import { Poster } from '../components/Poster'
 import { UpNextRail } from '../components/UpNext'
 import { Logo } from '../components/Logo'
 import { PosterRail, trackedKey } from '../components/PosterRail'
+import { ViewToggle, type ViewMode } from '../components/ViewToggle'
 import { getRecommendations } from '../lib/tmdb'
 import { useFollows, type FollowRow } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
@@ -28,6 +29,7 @@ export function Home() {
   const { session, loading } = useAuth()
   const [tab, setTab] = usePersistedState<MediaTab>('home:tab', 'tv')
   const [sort, setSort] = usePersistedState<SortKey>('home:sort', 'recent')
+  const [view, setView] = usePersistedState<ViewMode>('home:view', 'rail')
 
   const { data: follows } = useFollows()
 
@@ -67,9 +69,12 @@ export function Home() {
 
   return (
     <div className="px-5 pt-14">
-      <header className="mb-6">
-        <p className="text-sm text-muted">Welcome back</p>
-        <h1 className="text-3xl font-bold tracking-tight">Your library</h1>
+      <header className="mb-6 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted">Welcome back</p>
+          <h1 className="text-3xl font-bold tracking-tight">Your library</h1>
+        </div>
+        <ViewToggle value={view} onChange={setView} />
       </header>
 
       <div className="mb-6 grid grid-cols-2 gap-3">
@@ -108,7 +113,7 @@ export function Home() {
 
       <SurpriseMe items={watchlist} />
 
-      {tab === 'tv' && <UpNextRail />}
+      {tab === 'tv' && <UpNextRail view={view} />}
 
       <section className="mb-7">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -129,23 +134,7 @@ export function Home() {
         </div>
 
         {watchlist.length > 0 ? (
-          <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
-            {watchlist.map((r) => (
-              <Link
-                key={`${r.media_type}-${r.tmdb_id}`}
-                to={`/title/${r.media_type}/${r.tmdb_id}`}
-                className="w-28 shrink-0 active:scale-[0.97]"
-              >
-                <Poster
-                  path={r.poster_path}
-                  alt={r.name ?? ''}
-                  size="w342"
-                  className="aspect-[2/3] w-28 shadow-lg shadow-black/40"
-                />
-                <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
-              </Link>
-            ))}
-          </div>
+          <FollowView items={watchlist} view={view} />
         ) : (
           <EmptyWatchlist tab={tab} hasAnything={Boolean(follows && follows.length > 0)} />
         )}
@@ -253,6 +242,61 @@ function SurpriseMe({ items }: { items: FollowRow[] }) {
         </div>
       )}
     </>
+  )
+}
+
+// Renders a list of tracked titles in the chosen layout: horizontal rail,
+// wrapping poster grid, or vertical rows.
+function FollowView({ items, view }: { items: FollowRow[]; view: ViewMode }) {
+  if (view === 'list') {
+    return (
+      <div className="space-y-2">
+        {items.map((r) => (
+          <Link
+            key={`${r.media_type}-${r.tmdb_id}`}
+            to={`/title/${r.media_type}/${r.tmdb_id}`}
+            className="flex items-center gap-3 rounded-2xl border border-line bg-surface/60 p-2 active:scale-[0.99]"
+          >
+            <Poster
+              path={r.poster_path}
+              alt={r.name ?? ''}
+              size="w200"
+              rounded="rounded-lg"
+              className="h-16 w-11 shrink-0"
+            />
+            <p className="min-w-0 flex-1 truncate text-sm font-medium">{r.name}</p>
+            <span className="shrink-0 text-faint">›</span>
+          </Link>
+        ))}
+      </div>
+    )
+  }
+
+  const container =
+    view === 'grid'
+      ? 'grid grid-cols-3 gap-3'
+      : 'no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1'
+  const itemClass = view === 'grid' ? '' : 'w-28 shrink-0'
+  const posterWidth = view === 'grid' ? 'w-full' : 'w-28'
+
+  return (
+    <div className={container}>
+      {items.map((r) => (
+        <Link
+          key={`${r.media_type}-${r.tmdb_id}`}
+          to={`/title/${r.media_type}/${r.tmdb_id}`}
+          className={`${itemClass} active:scale-[0.97]`}
+        >
+          <Poster
+            path={r.poster_path}
+            alt={r.name ?? ''}
+            size="w342"
+            className={`aspect-[2/3] ${posterWidth} shadow-lg shadow-black/40`}
+          />
+          <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+        </Link>
+      ))}
+    </div>
   )
 }
 

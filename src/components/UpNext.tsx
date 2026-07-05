@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth'
 import { airedProgress, computeNextUp, useEpisodeWatches, useToggleEpisode } from '../lib/tracking'
 import type { TitleDetail } from '../lib/types'
 import { Poster } from './Poster'
+import type { ViewMode } from './ViewToggle'
 
 interface WatchingRow {
   tmdb_id: number
@@ -13,7 +14,7 @@ interface WatchingRow {
   poster_path: string | null
 }
 
-export function UpNextRail() {
+export function UpNextRail({ view = 'rail' }: { view?: ViewMode }) {
   const { session } = useAuth()
 
   const { data: watching } = useQuery({
@@ -33,31 +34,39 @@ export function UpNextRail() {
 
   if (!watching || watching.length === 0) return null
 
+  const container =
+    view === 'grid'
+      ? 'grid grid-cols-2 gap-3'
+      : view === 'list'
+        ? 'space-y-2'
+        : 'no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1'
+
   return (
     <section className="mb-7">
       <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Up next</h2>
-      <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+      <div className={container}>
         {watching.map((w) => (
-          <UpNextCard key={w.tmdb_id} row={w} />
+          <UpNextCard key={w.tmdb_id} row={w} view={view} />
         ))}
       </div>
     </section>
   )
 }
 
-function UpNextCard({ row }: { row: WatchingRow }) {
+function UpNextCard({ row, view }: { row: WatchingRow; view: ViewMode }) {
   const { data: detail } = useQuery({
     queryKey: ['title', 'tv', row.tmdb_id],
     queryFn: () => getTitle('tv', row.tmdb_id),
   })
   const watches = useEpisodeWatches(row.tmdb_id)
   const toggle = useToggleEpisode(
-    detail ?? {
-      id: row.tmdb_id,
-      media_type: 'tv',
-      title: row.name ?? '',
-      posterPath: row.poster_path,
-    } as TitleDetail,
+    detail ??
+      ({
+        id: row.tmdb_id,
+        media_type: 'tv',
+        title: row.name ?? '',
+        posterPath: row.poster_path,
+      } as TitleDetail),
   )
 
   const watchedSet = watches.data ?? new Set<string>()
@@ -75,29 +84,68 @@ function UpNextCard({ row }: { row: WatchingRow }) {
   // Caught up (or still loading detail) — nothing to show here.
   if (detail && !nextUp) return null
 
+  const bar =
+    progress.total > 0 ? (
+      <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
+        <div
+          className="h-full rounded-full bg-brand-gradient"
+          style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+        />
+      </div>
+    ) : null
+
+  const markWatched = () =>
+    nextUp && toggle.mutate({ season: nextUp.season, episode: nextUp.episode, watched: false })
+
+  // List: horizontal row with a thumbnail and a compact ✓ button.
+  if (view === 'list') {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface/60 p-2.5">
+        <Link to={`/title/tv/${row.tmdb_id}`} className="shrink-0 active:scale-[0.98]">
+          <Poster path={row.poster_path} alt={row.name ?? ''} size="w200" className="h-20 w-14" rounded="rounded-lg" />
+        </Link>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{row.name}</p>
+          {nextUp && (
+            <p className="truncate text-xs text-muted">
+              S{nextUp.season} · E{nextUp.episode}
+              {epName ? ` — ${epName}` : ''}
+            </p>
+          )}
+          {bar && <div className="mt-1.5">{bar}</div>}
+        </div>
+        {nextUp && (
+          <button
+            onClick={markWatched}
+            disabled={toggle.isPending}
+            aria-label="Mark watched"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-gradient text-sm font-semibold text-white transition active:scale-90 disabled:opacity-60"
+          >
+            {toggle.isPending ? '…' : '✓'}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // Rail & grid: a vertical card (rail is fixed-width & scrolls; grid fills).
+  const posterWidth = view === 'rail' ? 'w-40' : 'w-full'
   return (
-    <div className="w-40 shrink-0">
+    <div className={view === 'rail' ? 'w-40 shrink-0' : 'w-full'}>
       <Link to={`/title/tv/${row.tmdb_id}`} className="block active:scale-[0.98]">
         <Poster
           path={row.poster_path}
           alt={row.name ?? ''}
           size="w342"
-          className="aspect-[2/3] w-40 shadow-lg shadow-black/40"
+          className={`aspect-[2/3] ${posterWidth} shadow-lg shadow-black/40`}
         />
       </Link>
       <p className="mt-1.5 truncate text-sm font-medium">{row.name}</p>
+      {bar && <div className="mt-1.5">{bar}</div>}
       {progress.total > 0 && (
-        <div className="mt-1.5">
-          <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
-            <div
-              className="h-full rounded-full bg-brand-gradient"
-              style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
-            />
-          </div>
-          <p className="mt-1 text-[10px] text-faint">
-            {progress.done}/{progress.total} episodes
-          </p>
-        </div>
+        <p className="mt-1 text-[10px] text-faint">
+          {progress.done}/{progress.total} episodes
+        </p>
       )}
       {nextUp && (
         <>
@@ -106,9 +154,7 @@ function UpNextCard({ row }: { row: WatchingRow }) {
             {epName ? ` — ${epName}` : ''}
           </p>
           <button
-            onClick={() =>
-              toggle.mutate({ season: nextUp.season, episode: nextUp.episode, watched: false })
-            }
+            onClick={markWatched}
             disabled={toggle.isPending}
             className="mt-2 w-full rounded-xl bg-brand-gradient py-2 text-xs font-semibold shadow-md shadow-brand/20 transition active:scale-[0.97] disabled:opacity-60"
           >
