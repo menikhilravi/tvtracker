@@ -12,6 +12,16 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>
 }
 
+// Take over as soon as a new version is deployed instead of waiting behind the
+// old worker — otherwise refreshes keep serving the previous, stale bundle
+// (registerType is 'autoUpdate', and injectManifest doesn't add these for us).
+self.addEventListener('install', () => {
+  self.skipWaiting()
+})
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim())
+})
+
 // Precache the built app shell (vite-plugin-pwa injects the manifest here).
 precacheAndRoute(self.__WB_MANIFEST)
 
