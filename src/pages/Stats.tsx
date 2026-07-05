@@ -249,6 +249,11 @@ function TvStats() {
     queries: tvFollows.map((f) => ({
       queryKey: ['title', 'tv', f.tmdb_id],
       queryFn: () => getTitle('tv', f.tmdb_id),
+      // A large library bursts hundreds of requests; back off and retry so
+      // transient proxy rate-limits recover instead of dropping titles (which
+      // made the breakdowns fluctuate between loads).
+      retry: 3,
+      retryDelay: (n: number) => Math.min(1000 * 2 ** n, 8000),
     })),
   })
 
@@ -258,23 +263,31 @@ function TvStats() {
   const epMap = epWatches.data ?? new Map<number, Set<string>>()
   const watchedIn = (id: number) => epMap.get(id)?.size ?? 0
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
+  const detailById = new Map(resolved.map((d) => [d.id, d]))
   const loading = details.some((d) => d.isLoading)
 
   // Wait for details to settle so the numbers don't visibly climb from 0.
   if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
 
+  // Hard counts come straight from the paginated DB data (epMap), so they stay
+  // exact and stable even if some per-title TMDB detail fetches fail. Details
+  // only refine the estimates (runtime → time, episode totals → remaining) and
+  // the genre/network breakdowns.
   let minutes = 0
   let remaining = 0
   let episodesWatched = 0
   const genres = new Map<string, number>()
   const networks = new Map<string, number>()
-  for (const d of resolved) {
-    const w = watchedIn(d.id)
+  for (const f of tvFollows) {
+    const w = watchedIn(f.tmdb_id)
     episodesWatched += w
-    minutes += w * (d.episodeRunTime || 40)
-    if (statusById.get(d.id) === 'watching') {
+    const d = detailById.get(f.tmdb_id)
+    minutes += w * (d?.episodeRunTime || 40)
+    if (statusById.get(f.tmdb_id) === 'watching' && d) {
       remaining += Math.max(0, (d.numberOfEpisodes ?? 0) - w)
     }
+  }
+  for (const d of resolved) {
     for (const g of d.genres) genres.set(g, (genres.get(g) ?? 0) + 1)
     for (const n of d.networks) networks.set(n, (networks.get(n) ?? 0) + 1)
   }
@@ -308,6 +321,10 @@ function MovieStats() {
     queries: movieFollows.map((f) => ({
       queryKey: ['title', 'movie', f.tmdb_id],
       queryFn: () => getTitle('movie', f.tmdb_id),
+      // See TvStats: back off and retry so transient proxy rate-limits recover
+      // instead of dropping titles from the breakdown.
+      retry: 3,
+      retryDelay: (n: number) => Math.min(1000 * 2 ** n, 8000),
     })),
   })
 
@@ -319,15 +336,21 @@ function MovieStats() {
   if (loading) return <StatsSectionSkeleton icon="🎬" label="Movies" tiles={4} />
 
   const watched = watchedIds.data ?? new Set<number>()
+  const detailById = new Map(resolved.map((d) => [d.id, d]))
 
+  // Watched-count is DB-derived (watchedIds ∩ tracked movies) so it stays exact
+  // regardless of which TMDB detail fetches succeed; details only refine the
+  // runtime-based time estimate and the genre breakdown.
   let minutes = 0
   let watchedCount = 0
   const genres = new Map<string, number>()
-  for (const d of resolved) {
-    if (watched.has(d.id)) {
+  for (const f of movieFollows) {
+    if (watched.has(f.tmdb_id)) {
       watchedCount++
-      minutes += d.runtime ?? 115
+      minutes += detailById.get(f.tmdb_id)?.runtime ?? 115
     }
+  }
+  for (const d of resolved) {
     for (const g of d.genres) genres.set(g, (genres.get(g) ?? 0) + 1)
   }
   const upcoming = resolved
