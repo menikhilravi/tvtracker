@@ -81,8 +81,10 @@ function UpNextCard({ row, view }: { row: WatchingRow; view: ViewMode }) {
   })
   const epName = episodes?.find((e) => e.episodeNumber === nextUp?.episode)?.name
 
-  // Caught up (or still loading detail) — nothing to show here.
-  if (detail && !nextUp) return null
+  // Only render once we know the next episode. This hides caught-up shows and,
+  // crucially, avoids briefly showing a show (from the follow row) that then
+  // vanishes when its detail loads and reveals it's caught up.
+  if (!detail || !nextUp) return null
 
   const bar =
     progress.total > 0 ? (

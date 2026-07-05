@@ -133,10 +133,13 @@ export function Home() {
           )}
         </div>
 
-        {watchlist.length > 0 ? (
+        {follows === undefined ? (
+          // Still loading — don't flash the empty state before data arrives.
+          <div className="h-40 animate-pulse rounded-3xl border border-line bg-surface/60" />
+        ) : watchlist.length > 0 ? (
           <FollowView items={watchlist} view={view} />
         ) : (
-          <EmptyWatchlist tab={tab} hasAnything={Boolean(follows && follows.length > 0)} />
+          <EmptyWatchlist tab={tab} hasAnything={follows.length > 0} />
         )}
       </section>
 

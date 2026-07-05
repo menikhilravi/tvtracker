@@ -239,6 +239,9 @@ function TvStats() {
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
   const loading = details.some((d) => d.isLoading)
 
+  // Wait for details to settle so the numbers don't visibly climb from 0.
+  if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
+
   let minutes = 0
   let remaining = 0
   let episodesWatched = 0
@@ -291,6 +294,9 @@ function MovieStats() {
 
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
   const loading = details.some((d) => d.isLoading)
+
+  if (loading) return <StatsSectionSkeleton icon="🎬" label="Movies" tiles={4} />
+
   const watched = watchedIds.data ?? new Set<number>()
 
   let minutes = 0
@@ -319,6 +325,21 @@ function MovieStats() {
       </div>
       <BarList title="Top genres" items={topN(genres, 5)} />
       <MonthChart title="Upcoming releases" dates={upcoming} />
+    </section>
+  )
+}
+
+// While the per-title details load (cold cache), show a skeleton instead of
+// numbers computed from partial data — otherwise the tiles visibly climb.
+function StatsSectionSkeleton({ icon, label, tiles }: { icon: string; label: string; tiles: number }) {
+  return (
+    <section className="mt-8">
+      <SectionHeading icon={icon} label={label} loading />
+      <div className="grid grid-cols-2 gap-3">
+        {Array.from({ length: tiles }).map((_, i) => (
+          <div key={i} className="h-[92px] animate-pulse rounded-2xl border border-line bg-surface/60" />
+        ))}
+      </div>
     </section>
   )
 }
