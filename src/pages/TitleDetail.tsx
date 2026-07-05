@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getTitle, getSeason, getSimilarTitles, getCollection, IMG } from '../lib/tmdb'
 import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
@@ -34,7 +34,15 @@ const STATUS_OPTIONS: { value: FollowStatus; label: string }[] = [
 export function TitleDetail() {
   const { mediaType, id } = useParams<{ mediaType: MediaType; id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const tmdbId = Number(id)
+
+  // Optional deep link to a specific episode (?s=&e=), e.g. from the Up Next
+  // rail — opens that season and the episode on arrival.
+  const deepSeason = Number(searchParams.get('s'))
+  const deepEpisode = Number(searchParams.get('e'))
+  const deepLink =
+    deepSeason > 0 && deepEpisode > 0 ? { season: deepSeason, episode: deepEpisode } : null
 
   const { data: title, isLoading, error } = useQuery({
     queryKey: ['title', mediaType, tmdbId],
@@ -119,7 +127,7 @@ export function TitleDetail() {
 
         {title.media_type === 'movie' && <CollectionSection title={title} />}
 
-        {title.media_type === 'tv' && <Seasons show={title} />}
+        {title.media_type === 'tv' && <Seasons show={title} deepLink={deepLink} />}
 
         {title.cast.length > 0 && (
           <section className="mt-7">
@@ -530,8 +538,14 @@ function RatingSection({ title }: { title: TitleDetailType }) {
   )
 }
 
-function Seasons({ show }: { show: TitleDetailType }) {
-  const [open, setOpen] = useState<number | null>(null)
+function Seasons({
+  show,
+  deepLink,
+}: {
+  show: TitleDetailType
+  deepLink: { season: number; episode: number } | null
+}) {
+  const [open, setOpen] = useState<number | null>(deepLink?.season ?? null)
   const watches = useEpisodeWatches(show.id)
   const watchedSet = watches.data ?? new Set<string>()
   const ratings = useEpisodeRatings(show.id)
@@ -576,6 +590,7 @@ function Seasons({ show }: { show: TitleDetailType }) {
                   seasonNumber={s.seasonNumber}
                   watchedSet={watchedSet}
                   ratingMap={ratingMap}
+                  autoOpenEpisode={deepLink?.season === s.seasonNumber ? deepLink.episode : undefined}
                 />
               )}
             </div>
@@ -619,11 +634,13 @@ function SeasonEpisodes({
   seasonNumber,
   watchedSet,
   ratingMap,
+  autoOpenEpisode,
 }: {
   show: TitleDetailType
   seasonNumber: number
   watchedSet: Set<string>
   ratingMap: Map<string, number>
+  autoOpenEpisode?: number
 }) {
   const { session } = useAuth()
   const { data: episodes, isLoading } = useQuery({
@@ -633,6 +650,18 @@ function SeasonEpisodes({
   const toggle = useToggleEpisode(show)
   const toggleSeason = useToggleSeason(show)
   const [openEp, setOpenEp] = useState<Episode | null>(null)
+
+  // When deep-linked to an episode, open it once the season's episodes load.
+  // A ref guards against re-opening after the user closes the modal.
+  const autoOpened = useRef(false)
+  useEffect(() => {
+    if (autoOpened.current || autoOpenEpisode === undefined || !episodes) return
+    const target = episodes.find((e) => e.episodeNumber === autoOpenEpisode)
+    if (target) {
+      autoOpened.current = true
+      setOpenEp(target)
+    }
+  }, [episodes, autoOpenEpisode])
 
   if (isLoading) return <p className="p-3 text-xs text-muted">Loading episodes…</p>
   if (!episodes || episodes.length === 0)

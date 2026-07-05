@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
 import { UpNextRail } from '../components/UpNext'
@@ -100,33 +100,27 @@ export function Home() {
 
       {tab === 'tv' && <UpNextRail view={view} />}
 
-      <section className="mb-7">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold tracking-wide text-muted">Watchlist</h2>
-          {watchlist.length > 1 && (
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+      {tab === 'movie' ? (
+        <MovieWatchlistSections
+          rows={watchlist}
+          view={view}
+          sort={sort}
+          setSort={setSort}
+          follows={follows}
+        />
+      ) : (
+        <section className="mb-7">
+          <WatchlistHeader title="Watchlist" showSort={watchlist.length > 1} sort={sort} setSort={setSort} />
+          {follows === undefined ? (
+            // Still loading — don't flash the empty state before data arrives.
+            <div className="h-40 animate-pulse rounded-3xl border border-line bg-surface/60" />
+          ) : watchlist.length > 0 ? (
+            <FollowView items={watchlist} view={view} />
+          ) : (
+            <EmptyWatchlist tab={tab} hasAnything={follows.length > 0} />
           )}
-        </div>
-
-        {follows === undefined ? (
-          // Still loading — don't flash the empty state before data arrives.
-          <div className="h-40 animate-pulse rounded-3xl border border-line bg-surface/60" />
-        ) : watchlist.length > 0 ? (
-          <FollowView items={watchlist} view={view} />
-        ) : (
-          <EmptyWatchlist tab={tab} hasAnything={follows.length > 0} />
-        )}
-      </section>
+        </section>
+      )}
 
       <RecommendedRail follows={follows ?? []} tab={tab} />
 
@@ -262,7 +256,116 @@ function SurpriseMe({ items }: { items: FollowRow[] }) {
 
 // Renders a list of tracked titles in the chosen layout: horizontal rail,
 // wrapping poster grid, or vertical rows.
-function FollowView({ items, view }: { items: FollowRow[]; view: ViewMode }) {
+function WatchlistHeader({
+  title,
+  showSort,
+  sort,
+  setSort,
+}: {
+  title: string
+  showSort: boolean
+  sort: SortKey
+  setSort: (s: SortKey) => void
+}) {
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="text-sm font-semibold tracking-wide text-muted">{title}</h2>
+      {showSort && (
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
+const formatReleaseDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+
+// Movies split into a released Watchlist and a separate Upcoming section, so
+// films you can't watch yet don't clutter the list. Release dates aren't on the
+// follow row, so we fetch each movie's detail (shared cache with the detail
+// pages) and bucket by release date vs. today.
+function MovieWatchlistSections({
+  rows,
+  view,
+  sort,
+  setSort,
+  follows,
+}: {
+  rows: FollowRow[]
+  view: ViewMode
+  sort: SortKey
+  setSort: (s: SortKey) => void
+  follows: FollowRow[] | undefined
+}) {
+  const details = useQueries({
+    queries: rows.map((r) => ({
+      queryKey: ['title', 'movie', r.tmdb_id],
+      queryFn: () => getTitle('movie', r.tmdb_id),
+      retry: 3,
+      retryDelay: (n: number) => Math.min(1000 * 2 ** n, 8000),
+    })),
+  })
+  const dateById = new Map<number, string | null>()
+  for (const d of details) if (d.data) dateById.set(d.data.id, d.data.releaseDate)
+
+  const today = new Date().toISOString().slice(0, 10)
+  // Unknown/undated dates stay in the Watchlist — only a future date moves a
+  // movie to Upcoming, so nothing is hidden while details are still loading.
+  const isUpcoming = (r: FollowRow) => {
+    const d = dateById.get(r.tmdb_id)
+    return Boolean(d && d > today)
+  }
+  const released = rows.filter((r) => !isUpcoming(r))
+  const upcoming = rows
+    .filter(isUpcoming)
+    .sort((a, b) => (dateById.get(a.tmdb_id) ?? '').localeCompare(dateById.get(b.tmdb_id) ?? ''))
+
+  return (
+    <>
+      <section className="mb-7">
+        <WatchlistHeader title="Watchlist" showSort={released.length > 1} sort={sort} setSort={setSort} />
+        {follows === undefined ? (
+          <div className="h-40 animate-pulse rounded-3xl border border-line bg-surface/60" />
+        ) : released.length > 0 ? (
+          <FollowView items={released} view={view} />
+        ) : (
+          <EmptyWatchlist tab="movie" hasAnything={follows.length > 0} />
+        )}
+      </section>
+
+      {upcoming.length > 0 && (
+        <section className="mb-7">
+          <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">🎬 Upcoming movies</h2>
+          <FollowView items={upcoming} view={view} dateById={dateById} />
+        </section>
+      )}
+    </>
+  )
+}
+
+function FollowView({
+  items,
+  view,
+  dateById,
+}: {
+  items: FollowRow[]
+  view: ViewMode
+  dateById?: Map<number, string | null>
+}) {
   if (view === 'list') {
     return (
       <div className="space-y-2">
@@ -279,7 +382,14 @@ function FollowView({ items, view }: { items: FollowRow[]; view: ViewMode }) {
               rounded="rounded-lg"
               className="h-16 w-11 shrink-0"
             />
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">{r.name}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{r.name}</p>
+              {dateById?.get(r.tmdb_id) && (
+                <p className="truncate text-[11px] text-faint">
+                  {formatReleaseDate(dateById.get(r.tmdb_id)!)}
+                </p>
+              )}
+            </div>
             <span className="shrink-0 text-faint">›</span>
           </Link>
         ))}
@@ -309,6 +419,9 @@ function FollowView({ items, view }: { items: FollowRow[]; view: ViewMode }) {
             className={`aspect-[2/3] ${posterWidth} shadow-lg shadow-black/40`}
           />
           <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
+          {dateById?.get(r.tmdb_id) && (
+            <p className="truncate text-[10px] text-faint">{formatReleaseDate(dateById.get(r.tmdb_id)!)}</p>
+          )}
         </Link>
       ))}
     </div>
