@@ -31,7 +31,10 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^collection\/\d+$/, params: [] },
   // Genre browsing: the genre list, then discover filtered by genre.
   { pattern: /^genre\/(movie|tv)\/list$/, params: [] },
-  { pattern: /^discover\/(movie|tv)$/, params: ['with_genres', 'sort_by', 'page', 'include_adult'] },
+  {
+    pattern: /^discover\/(movie|tv)$/,
+    params: ['with_genres', 'with_original_language', 'sort_by', 'page', 'include_adult'],
+  },
   // Convert an external id (e.g. TheTVDB) to a TMDB id — used by the importer.
   { pattern: /^find\/[^/]+$/, params: ['external_source'] },
 ]

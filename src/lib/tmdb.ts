@@ -79,11 +79,29 @@ function toResults(items: RawMultiItem[], fallbackType?: MediaType): SearchResul
 
 export async function searchMulti(query: string): Promise<SearchResult[]> {
   if (!query.trim()) return []
-  const data = await proxy<{ results: RawMultiItem[] }>('search/multi', {
-    query,
-    include_adult: 'false',
+  // Pull the first two pages and merge: regional/less-popular titles often rank
+  // below global matches and get pushed onto page 2.
+  const [p1, p2] = await Promise.all([
+    proxy<{ results: RawMultiItem[]; total_pages: number }>('search/multi', {
+      query,
+      include_adult: 'false',
+      page: '1',
+    }),
+    proxy<{ results: RawMultiItem[] }>('search/multi', {
+      query,
+      include_adult: 'false',
+      page: '2',
+    }).catch(() => ({ results: [] })),
+  ])
+  const merged = toResults([...p1.results, ...(p1.total_pages > 1 ? p2.results : [])])
+  // Dedupe by id (pages shouldn't overlap, but be safe).
+  const seen = new Set<string>()
+  return merged.filter((r) => {
+    const k = `${r.media_type}-${r.id}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
   })
-  return toResults(data.results)
 }
 
 // --- Detail -----------------------------------------------------------------
@@ -307,6 +325,21 @@ export async function discoverByGenre(
 ): Promise<SearchResult[]> {
   const data = await proxy<{ results: RawMultiItem[] }>(`discover/${mediaType}`, {
     with_genres: String(genreId),
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+  })
+  return toResults(data.results, mediaType)
+}
+
+// Popular titles in a given original language (ISO 639-1, e.g. 'ta' Tamil,
+// 'ml' Malayalam) — the way to browse regional cinema that's hard to find by
+// title alone.
+export async function discoverByLanguage(
+  mediaType: MediaType,
+  language: string,
+): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`discover/${mediaType}`, {
+    with_original_language: language,
     sort_by: 'popularity.desc',
     include_adult: 'false',
   })
