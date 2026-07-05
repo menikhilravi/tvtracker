@@ -77,21 +77,6 @@ export function Home() {
         <ViewToggle value={view} onChange={setView} />
       </header>
 
-      <div className="mb-6 grid grid-cols-2 gap-3">
-        <Link
-          to="/calendar"
-          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
-        >
-          🗓️ Upcoming
-        </Link>
-        <Link
-          to="/history"
-          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
-        >
-          🕑 History
-        </Link>
-      </div>
-
       <div className="mb-6 flex gap-1 rounded-2xl border border-line bg-surface/60 p-1">
         {(
           [
@@ -144,6 +129,21 @@ export function Home() {
       </section>
 
       <RecommendedRail follows={follows ?? []} tab={tab} />
+
+      <div className="mt-2 grid grid-cols-2 gap-3">
+        <Link
+          to="/calendar"
+          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
+        >
+          🗓️ Upcoming
+        </Link>
+        <Link
+          to="/history"
+          className="flex items-center gap-2 rounded-2xl border border-line bg-surface/60 px-4 py-3 text-sm font-medium active:scale-[0.98]"
+        >
+          🕑 History
+        </Link>
+      </div>
     </div>
   )
 }

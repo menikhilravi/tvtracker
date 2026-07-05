@@ -10,10 +10,12 @@ import {
 } from '../lib/tracking'
 import { getTitle } from '../lib/tmdb'
 import type { TitleDetail } from '../lib/types'
+import { usePersistedState } from '../lib/uiState'
 
 // Stats + activity, split out of Profile onto their own page.
 export function Stats() {
   const { session } = useAuth()
+  const [tab, setTab] = usePersistedState<'tv' | 'movie'>('stats:tab', 'tv')
   return (
     <div className="px-5 pt-14 pb-6">
       <Link to="/profile" className="inline-flex items-center gap-1 text-sm text-muted active:opacity-70">
@@ -29,8 +31,27 @@ export function Stats() {
         <>
           <StatsSection />
           <ActivitySection />
-          <TvStats />
-          <MovieStats />
+
+          <div className="mt-8 flex gap-1 rounded-2xl border border-line bg-surface/60 p-1">
+            {(
+              [
+                { key: 'tv', label: '📺 TV Shows' },
+                { key: 'movie', label: '🎬 Movies' },
+              ] as { key: 'tv' | 'movie'; label: string }[]
+            ).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition active:scale-[0.98] ${
+                  tab === t.key ? 'bg-brand-gradient text-white shadow-lg shadow-brand/25' : 'text-muted'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'tv' ? <TvStats /> : <MovieStats />}
         </>
       )}
     </div>
@@ -263,7 +284,7 @@ function TvStats() {
   const time = formatWatchTime(minutes)
 
   return (
-    <section className="mt-8">
+    <section className="mt-6">
       <SectionHeading icon="📺" label="TV Shows" loading={loading} />
       <div className="grid grid-cols-2 gap-3">
         <StatTile icon="📺" value={tvFollows.length} label="shows" />
@@ -315,7 +336,7 @@ function MovieStats() {
   const time = formatWatchTime(minutes)
 
   return (
-    <section className="mt-8">
+    <section className="mt-6">
       <SectionHeading icon="🎬" label="Movies" loading={loading} />
       <div className="grid grid-cols-2 gap-3">
         <StatTile icon="🎬" value={movieFollows.length} label="movies" />
@@ -333,7 +354,7 @@ function MovieStats() {
 // numbers computed from partial data — otherwise the tiles visibly climb.
 function StatsSectionSkeleton({ icon, label, tiles }: { icon: string; label: string; tiles: number }) {
   return (
-    <section className="mt-8">
+    <section className="mt-6">
       <SectionHeading icon={icon} label={label} loading />
       <div className="grid grid-cols-2 gap-3">
         {Array.from({ length: tiles }).map((_, i) => (
