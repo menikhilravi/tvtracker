@@ -100,6 +100,9 @@ interface RawDetail {
   genres?: { name: string }[]
   vote_average?: number
   runtime?: number
+  episode_run_time?: number[]
+  number_of_episodes?: number
+  networks?: { name: string }[]
   seasons?: {
     season_number: number
     name: string
@@ -200,6 +203,9 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     genres: (data.genres ?? []).map((g) => g.name),
     voteAverage: data.vote_average ?? 0,
     runtime: data.runtime ?? null,
+    episodeRunTime: data.episode_run_time?.[0] ?? null,
+    numberOfEpisodes: data.number_of_episodes ?? null,
+    networks: (data.networks ?? []).map((n) => n.name),
     seasons,
     cast: (data.credits?.cast ?? []).slice(0, 12).map((c) => ({
       name: c.name,

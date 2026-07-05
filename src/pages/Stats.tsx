@@ -1,6 +1,15 @@
 import { Link } from 'react-router-dom'
+import { useQueries } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
-import { useStats, useWatchActivity } from '../lib/tracking'
+import {
+  useStats,
+  useWatchActivity,
+  useFollows,
+  useAllEpisodeWatches,
+  useWatchedMovieIds,
+} from '../lib/tracking'
+import { getTitle } from '../lib/tmdb'
+import type { TitleDetail } from '../lib/types'
 
 // Stats + activity, split out of Profile onto their own page.
 export function Stats() {
@@ -20,6 +29,8 @@ export function Stats() {
         <>
           <StatsSection />
           <ActivitySection />
+          <TvStats />
+          <MovieStats />
         </>
       )}
     </div>
@@ -178,6 +189,220 @@ function StatTile({ icon, value, label }: { icon: string; value: number; label: 
       <div className="text-lg">{icon}</div>
       <div className="mt-1 text-2xl font-bold tracking-tight">{value}</div>
       <div className="mt-0.5 text-[11px] uppercase tracking-wide text-faint">{label}</div>
+    </div>
+  )
+}
+
+function TimeTile({ value, unit }: { value: string; unit: string }) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface/60 px-3 py-4 text-center">
+      <div className="text-lg">⏱️</div>
+      <div className="mt-1 text-2xl font-bold tracking-tight">{value}</div>
+      <div className="mt-0.5 text-[11px] uppercase tracking-wide text-faint">{unit} watched</div>
+    </div>
+  )
+}
+
+// --- TV & Movies breakdowns -------------------------------------------------
+// These need per-title TMDB detail (genres, networks, runtimes, episode
+// counts), so they fetch getTitle for every tracked title — cached and shared
+// with the detail pages. On a large library the first load takes a moment.
+
+function formatWatchTime(minutes: number): { value: string; unit: string } {
+  const hours = Math.round(minutes / 60)
+  if (hours >= 48) return { value: (minutes / 60 / 24).toFixed(1), unit: 'days' }
+  return { value: String(hours), unit: 'hours' }
+}
+
+const topN = (tally: Map<string, number>, n: number): [string, number][] =>
+  [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)
+
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
+function TvStats() {
+  const { data: follows } = useFollows()
+  const epWatches = useAllEpisodeWatches()
+  const tvFollows = (follows ?? []).filter((f) => f.media_type === 'tv')
+
+  const details = useQueries({
+    queries: tvFollows.map((f) => ({
+      queryKey: ['title', 'tv', f.tmdb_id],
+      queryFn: () => getTitle('tv', f.tmdb_id),
+    })),
+  })
+
+  if (tvFollows.length === 0) return null
+
+  const statusById = new Map(tvFollows.map((f) => [f.tmdb_id, f.status]))
+  const epMap = epWatches.data ?? new Map<number, Set<string>>()
+  const watchedIn = (id: number) => epMap.get(id)?.size ?? 0
+  const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
+  const loading = details.some((d) => d.isLoading)
+
+  let minutes = 0
+  let remaining = 0
+  let episodesWatched = 0
+  const genres = new Map<string, number>()
+  const networks = new Map<string, number>()
+  for (const d of resolved) {
+    const w = watchedIn(d.id)
+    episodesWatched += w
+    minutes += w * (d.episodeRunTime || 40)
+    if (statusById.get(d.id) === 'watching') {
+      remaining += Math.max(0, (d.numberOfEpisodes ?? 0) - w)
+    }
+    for (const g of d.genres) genres.set(g, (genres.get(g) ?? 0) + 1)
+    for (const n of d.networks) networks.set(n, (networks.get(n) ?? 0) + 1)
+  }
+  const upcoming = resolved
+    .map((d) => d.nextEpisodeToAir?.airDate)
+    .filter((x): x is string => typeof x === 'string' && x >= todayISO())
+  const time = formatWatchTime(minutes)
+
+  return (
+    <section className="mt-8">
+      <SectionHeading icon="📺" label="TV Shows" loading={loading} />
+      <div className="grid grid-cols-2 gap-3">
+        <StatTile icon="📺" value={tvFollows.length} label="shows" />
+        <TimeTile value={time.value} unit={time.unit} />
+        <StatTile icon="✓" value={episodesWatched} label="episodes" />
+        <StatTile icon="⏳" value={remaining} label="remaining" />
+      </div>
+      <BarList title="Top genres" items={topN(genres, 5)} />
+      <BarList title="Top networks" items={topN(networks, 5)} />
+      <MonthChart title="Upcoming episodes" dates={upcoming} />
+    </section>
+  )
+}
+
+function MovieStats() {
+  const { data: follows } = useFollows()
+  const watchedIds = useWatchedMovieIds()
+  const movieFollows = (follows ?? []).filter((f) => f.media_type === 'movie')
+
+  const details = useQueries({
+    queries: movieFollows.map((f) => ({
+      queryKey: ['title', 'movie', f.tmdb_id],
+      queryFn: () => getTitle('movie', f.tmdb_id),
+    })),
+  })
+
+  if (movieFollows.length === 0) return null
+
+  const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
+  const loading = details.some((d) => d.isLoading)
+  const watched = watchedIds.data ?? new Set<number>()
+
+  let minutes = 0
+  let watchedCount = 0
+  const genres = new Map<string, number>()
+  for (const d of resolved) {
+    if (watched.has(d.id)) {
+      watchedCount++
+      minutes += d.runtime ?? 115
+    }
+    for (const g of d.genres) genres.set(g, (genres.get(g) ?? 0) + 1)
+  }
+  const upcoming = resolved
+    .map((d) => d.releaseDate)
+    .filter((x): x is string => typeof x === 'string' && x >= todayISO())
+  const time = formatWatchTime(minutes)
+
+  return (
+    <section className="mt-8">
+      <SectionHeading icon="🎬" label="Movies" loading={loading} />
+      <div className="grid grid-cols-2 gap-3">
+        <StatTile icon="🎬" value={movieFollows.length} label="movies" />
+        <TimeTile value={time.value} unit={time.unit} />
+        <StatTile icon="✓" value={watchedCount} label="watched" />
+        <StatTile icon="🍿" value={Math.max(0, movieFollows.length - watchedCount)} label="to watch" />
+      </div>
+      <BarList title="Top genres" items={topN(genres, 5)} />
+      <MonthChart title="Upcoming releases" dates={upcoming} />
+    </section>
+  )
+}
+
+function SectionHeading({ icon, label, loading }: { icon: string; label: string; loading: boolean }) {
+  return (
+    <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-wide text-muted">
+      <span>
+        {icon} {label}
+      </span>
+      {loading && <span className="text-[11px] font-normal text-faint">crunching…</span>}
+    </h2>
+  )
+}
+
+// A ranked horizontal bar list (genres / networks). Single hue — identity is
+// carried by the labels, so no legend or per-series color is needed.
+function BarList({ title, items }: { title: string; items: [string, number][] }) {
+  if (items.length === 0) return null
+  const max = Math.max(...items.map(([, v]) => v))
+  return (
+    <div className="mt-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">{title}</h3>
+      <div className="space-y-1.5">
+        {items.map(([name, count]) => (
+          <div key={name} className="flex items-center gap-2">
+            <span className="w-28 shrink-0 truncate text-xs text-ink/90">{name}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+              <div
+                className="h-full rounded-full bg-brand-gradient"
+                style={{ width: `${Math.max(4, (count / max) * 100)}%` }}
+              />
+            </div>
+            <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted">{count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// A vertical bar chart of counts across the next 6 months. One series, so bars
+// are a single brand hue, anchored to a common baseline with direct labels.
+function MonthChart({ title, dates }: { title: string; dates: string[] }) {
+  const now = new Date()
+  const buckets = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    return {
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: d.toLocaleDateString(undefined, { month: 'short' }),
+      count: 0,
+    }
+  })
+  const idx = new Map(buckets.map((b, i) => [b.key, i]))
+  for (const iso of dates) {
+    const i = idx.get(iso.slice(0, 7))
+    if (i !== undefined) buckets[i].count++
+  }
+
+  const total = buckets.reduce((a, b) => a + b.count, 0)
+  const max = Math.max(1, ...buckets.map((b) => b.count))
+  return (
+    <div className="mt-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">{title}</h3>
+      {total === 0 ? (
+        <p className="text-xs text-muted">Nothing scheduled in the next 6 months.</p>
+      ) : (
+        <div className="flex items-end justify-between gap-2">
+          {buckets.map((b) => {
+            const height = b.count ? Math.max(4, Math.round((b.count / max) * 88)) : 0
+            return (
+              <div key={b.key} className="flex flex-1 flex-col items-center gap-1">
+                <span className="h-3 text-[10px] tabular-nums text-faint">{b.count || ''}</span>
+                <div
+                  className="w-full max-w-8 rounded-t-[4px] bg-brand-gradient"
+                  style={{ height }}
+                  title={`${b.label}: ${b.count}`}
+                />
+                <span className="text-[10px] text-muted">{b.label}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

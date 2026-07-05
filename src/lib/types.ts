@@ -71,6 +71,9 @@ export interface TitleDetail {
   genres: string[]
   voteAverage: number
   runtime: number | null // minutes (movies)
+  episodeRunTime: number | null // tv only: typical episode length (minutes)
+  numberOfEpisodes: number | null // tv only: total episodes across the series
+  networks: string[] // tv only: e.g. HBO, Netflix
   seasons: Season[] // tv only
   cast: { name: string; character: string; profilePath: string | null }[]
   // tv only: the most recently aired and next scheduled episodes (from TMDB).
