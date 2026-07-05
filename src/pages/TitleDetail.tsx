@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getTitle, getSeason, getRecommendations, getCollection, IMG } from '../lib/tmdb'
+import { getTitle, getSeason, getSimilarTitles, getCollection, IMG } from '../lib/tmdb'
 import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { PosterRail, trackedKey } from '../components/PosterRail'
@@ -221,8 +221,12 @@ function CollectionSection({ title }: { title: TitleDetailType }) {
 // are dimmed/badged (shares the rail behavior used on Home and Discover).
 function MoreLikeThis({ title }: { title: TitleDetailType }) {
   const { data } = useQuery({
-    queryKey: ['recommendations', title.media_type, title.id],
-    queryFn: () => getRecommendations(title.media_type, title.id),
+    queryKey: ['similar', title.media_type, title.id],
+    queryFn: () =>
+      getSimilarTitles(title.media_type, title.id, {
+        originalLanguage: title.originalLanguage,
+        genreIds: title.genreIds,
+      }),
   })
   const { data: follows } = useFollows()
   const tracked = useMemo(

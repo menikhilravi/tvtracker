@@ -59,6 +59,7 @@ interface RawMultiItem {
   first_air_date?: string
   overview?: string
   genre_ids?: number[]
+  original_language?: string
 }
 
 // Normalize raw TMDB list rows into SearchResult[]. `fallbackType` supplies the
@@ -75,6 +76,7 @@ function toResults(items: RawMultiItem[], fallbackType?: MediaType): SearchResul
       year: year(r.release_date ?? r.first_air_date),
       overview: r.overview ?? '',
       genreIds: r.genre_ids ?? [],
+      originalLanguage: r.original_language ?? null,
     }))
 }
 
@@ -116,7 +118,8 @@ interface RawDetail {
   backdrop_path?: string | null
   release_date?: string
   first_air_date?: string
-  genres?: { name: string }[]
+  original_language?: string
+  genres?: { id: number; name: string }[]
   vote_average?: number
   runtime?: number
   episode_run_time?: number[]
@@ -220,6 +223,8 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     year: year(data.release_date ?? data.first_air_date),
     releaseDate: data.release_date ?? null,
     genres: (data.genres ?? []).map((g) => g.name),
+    genreIds: (data.genres ?? []).map((g) => g.id),
+    originalLanguage: data.original_language ?? null,
     voteAverage: data.vote_average ?? 0,
     runtime: data.runtime ?? null,
     episodeRunTime: data.episode_run_time?.[0] ?? null,
@@ -335,12 +340,82 @@ export async function getTopRated(mediaType: MediaType): Promise<SearchResult[]>
   return toResults(data.results, mediaType)
 }
 
-// Titles similar to one the user already likes ("Because you watched …").
-export async function getRecommendations(
+// The seed's traits that let us keep regional recommendations regional.
+export interface SimilarSeed {
+  originalLanguage: string | null
+  genreIds: number[]
+}
+
+const dedupeResults = (items: SearchResult[]): SearchResult[] => {
+  const seen = new Set<string>()
+  return items.filter((r) => {
+    const k = `${r.media_type}-${r.id}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+// "More like this" / "Because you watched …". TMDB's /recommendations is
+// popularity-driven and skews toward global (mostly English) hits, so for a
+// regional title it returns thin or off-context results. We blend it with
+// /similar (genre+keyword based), and for non-English titles supplement with a
+// same-language + same-genre /discover pass, ranking same-language titles first
+// so the regional context leads.
+export async function getSimilarTitles(
   mediaType: MediaType,
   id: number,
+  seed: SimilarSeed,
 ): Promise<SearchResult[]> {
-  const data = await proxy<{ results: RawMultiItem[] }>(`${mediaType}/${id}/recommendations`)
+  const [recs, similar] = await Promise.all([
+    proxy<{ results: RawMultiItem[] }>(`${mediaType}/${id}/recommendations`).catch(() => ({
+      results: [],
+    })),
+    proxy<{ results: RawMultiItem[] }>(`${mediaType}/${id}/similar`).catch(() => ({ results: [] })),
+  ])
+
+  let merged = dedupeResults(toResults([...recs.results, ...similar.results], mediaType)).filter(
+    (r) => r.id !== id,
+  )
+
+  const lang = seed.originalLanguage
+  const isRegional = Boolean(lang) && lang !== 'en'
+
+  if (isRegional && lang) {
+    const sameLang = merged.filter((r) => r.originalLanguage === lang)
+    // TMDB's recs are sparse for regional cinema — top up from same-language,
+    // same-genre discovery so the rail actually fills with relevant titles.
+    if (sameLang.length < 8) {
+      const disc = await discoverSimilar(mediaType, lang, seed.genreIds).catch(() => [])
+      merged = dedupeResults([...merged, ...disc]).filter((r) => r.id !== id)
+    }
+    // Stable sort: same-language titles lead, original order preserved otherwise.
+    merged = merged
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => {
+        const rank = Number(b.r.originalLanguage === lang) - Number(a.r.originalLanguage === lang)
+        return rank !== 0 ? rank : a.i - b.i
+      })
+      .map(({ r }) => r)
+  }
+
+  return merged
+}
+
+// Popular titles sharing a seed's original language and (a few of) its genres.
+// Genres are OR'd (`|`) to widen the net rather than over-constrain.
+async function discoverSimilar(
+  mediaType: MediaType,
+  language: string,
+  genreIds: number[],
+): Promise<SearchResult[]> {
+  const params: Record<string, string> = {
+    with_original_language: language,
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+  }
+  if (genreIds.length) params.with_genres = genreIds.slice(0, 3).join('|')
+  const data = await proxy<{ results: RawMultiItem[] }>(`discover/${mediaType}`, params)
   return toResults(data.results, mediaType)
 }
 

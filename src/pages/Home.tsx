@@ -7,7 +7,7 @@ import { UpNextRail } from '../components/UpNext'
 import { Logo } from '../components/Logo'
 import { PosterRail, trackedKey } from '../components/PosterRail'
 import { ViewToggle, type ViewMode } from '../components/ViewToggle'
-import { getRecommendations } from '../lib/tmdb'
+import { getSimilarTitles, getTitle } from '../lib/tmdb'
 import { useFollows, type FollowRow } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
 
@@ -169,10 +169,22 @@ function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab
     [follows],
   )
 
-  const { data } = useQuery({
-    queryKey: ['recommendations', seed?.media_type, seed?.tmdb_id],
-    queryFn: () => getRecommendations(seed!.media_type, seed!.tmdb_id),
+  // Fetch the seed's detail (shared cache with the title page) for its original
+  // language + genres, so the rail can stay regional when the seed is regional.
+  const { data: seedDetail } = useQuery({
+    queryKey: ['title', seed?.media_type, seed?.tmdb_id],
+    queryFn: () => getTitle(seed!.media_type, seed!.tmdb_id),
     enabled: Boolean(seed),
+  })
+
+  const { data } = useQuery({
+    queryKey: ['similar', seed?.media_type, seed?.tmdb_id],
+    queryFn: () =>
+      getSimilarTitles(seed!.media_type, seed!.tmdb_id, {
+        originalLanguage: seedDetail!.originalLanguage,
+        genreIds: seedDetail!.genreIds,
+      }),
+    enabled: Boolean(seed && seedDetail),
   })
 
   if (!seed) return null

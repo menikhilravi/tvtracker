@@ -27,6 +27,7 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^(movie|tv)\/popular$/, params: ['page'] },
   { pattern: /^(movie|tv)\/top_rated$/, params: ['page'] },
   { pattern: /^(movie|tv)\/\d+\/recommendations$/, params: ['page'] },
+  { pattern: /^(movie|tv)\/\d+\/similar$/, params: ['page'] },
   // A movie franchise/collection and its parts (belongs_to_collection).
   { pattern: /^collection\/\d+$/, params: [] },
   // A person (actor) plus their combined movie+TV filmography.

@@ -8,6 +8,7 @@ export interface SearchResult {
   year: string | null
   overview: string
   genreIds: number[]
+  originalLanguage: string | null // ISO 639-1, e.g. 'ta', 'ml' — used to keep regional recs regional
 }
 
 export interface Season {
@@ -79,6 +80,8 @@ export interface TitleDetail {
   year: string | null
   releaseDate: string | null // full ISO date; used for upcoming-movie calendar
   genres: string[]
+  genreIds: number[] // same genres as ids, for language-aware "more like this" discovery
+  originalLanguage: string | null // ISO 639-1; drives regional recommendation fallback
   voteAverage: number
   runtime: number | null // minutes (movies)
   episodeRunTime: number | null // tv only: typical episode length (minutes)
