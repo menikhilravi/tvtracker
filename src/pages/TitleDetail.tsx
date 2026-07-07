@@ -20,6 +20,8 @@ import {
   useToggleEpisode,
   useToggleSeason,
   useRating,
+  useCharacterVotes,
+  useToggleCharacterVote,
   type FollowStatus,
 } from '../lib/tracking'
 
@@ -534,6 +536,85 @@ function RatingSection({ title }: { title: TitleDetailType }) {
           + Add a review
         </button>
       )}
+
+      <FavoriteCharacters cast={title.cast} tmdbId={title.id} mediaType={title.media_type} />
+    </div>
+  )
+}
+
+// A compact cast rail where you tap a character to favorite it. Scoped to the
+// whole title, or to a single episode when `episode` is passed. Sign-in is
+// assumed by callers (both the review card and the episode modal gate on it).
+function FavoriteCharacters({
+  cast,
+  tmdbId,
+  mediaType,
+  episode,
+}: {
+  cast: TitleDetailType['cast']
+  tmdbId: number
+  mediaType: MediaType
+  episode?: { season: number; episode: number }
+}) {
+  const votes = useCharacterVotes(tmdbId, mediaType, episode)
+  const toggle = useToggleCharacterVote({ id: tmdbId, media_type: mediaType }, episode)
+  const voted = votes.data ?? new Set<number>()
+
+  if (cast.length === 0) return null
+
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium text-muted">Favorite characters</span>
+        {voted.size > 0 && <span className="text-[11px] text-faint">{voted.size} picked</span>}
+      </div>
+      <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+        {cast.map((c) => {
+          const isVoted = voted.has(c.id)
+          const label = c.character || c.name
+          return (
+            <button
+              key={c.id}
+              onClick={() =>
+                toggle.mutate({
+                  character: {
+                    personId: c.id,
+                    characterName: c.character || null,
+                    actorName: c.name || null,
+                    profilePath: c.profilePath,
+                  },
+                  voted: isVoted,
+                })
+              }
+              disabled={toggle.isPending}
+              aria-pressed={isVoted}
+              aria-label={`${isVoted ? 'Unfavorite' : 'Favorite'} ${label}`}
+              className="w-16 shrink-0 text-center active:scale-[0.97] disabled:opacity-60"
+            >
+              <div className="relative mx-auto h-16 w-16">
+                <Poster
+                  path={c.profilePath}
+                  alt={c.name}
+                  size="w200"
+                  rounded="rounded-full"
+                  className={`h-16 w-16 ${isVoted ? 'ring-2 ring-brand' : ''}`}
+                />
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 grid h-6 w-6 place-items-center rounded-full text-xs shadow ${
+                    isVoted
+                      ? 'bg-brand-gradient text-white'
+                      : 'bg-surface-2 text-muted ring-1 ring-line'
+                  }`}
+                >
+                  {isVoted ? '♥' : '♡'}
+                </span>
+              </div>
+              <p className="mt-1.5 truncate text-[11px] font-medium">{label}</p>
+              {c.character && <p className="truncate text-[10px] text-faint">{c.name}</p>}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -822,6 +903,13 @@ function EpisodeModal({
             >
               {watched ? '✓ Watched — tap to unmark' : 'Mark watched'}
             </button>
+
+            <FavoriteCharacters
+              cast={show.cast}
+              tmdbId={show.id}
+              mediaType={show.media_type}
+              episode={{ season: episode.seasonNumber, episode: episode.episodeNumber }}
+            />
           </div>
         )}
       </div>

@@ -436,6 +436,89 @@ export function useAllRatings() {
   })
 }
 
+// --- Favorite characters ----------------------------------------------------
+
+// A character to favorite, sourced from a title's TMDB cast (personId is the
+// TMDB person/actor id, which is the character's stable identity here).
+export interface CharacterPick {
+  personId: number
+  characterName: string | null
+  actorName: string | null
+  profilePath: string | null
+}
+
+// The set of TMDB person ids the user has favorited for a title — title-level
+// when `episode` is omitted, or for a specific episode otherwise.
+export function useCharacterVotes(
+  tmdbId: number,
+  mediaType: MediaType,
+  episode?: { season: number; episode: number },
+) {
+  const { session } = useAuth()
+  const scope = episode ? `${episode.season}-${episode.episode}` : 'title'
+  return useQuery({
+    queryKey: ['character-votes', mediaType, tmdbId, scope],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      let q = supabase!
+        .from('character_votes')
+        .select('person_id')
+        .eq('tmdb_id', tmdbId)
+        .eq('media_type', mediaType)
+      q = episode
+        ? q.eq('season_number', episode.season).eq('episode_number', episode.episode)
+        : q.is('season_number', null)
+      const { data, error } = await q
+      if (error) throw error
+      return new Set((data as { person_id: number }[]).map((r) => r.person_id))
+    },
+  })
+}
+
+// Toggle a character as a favorite for a title or a specific episode. Uses
+// explicit insert/delete (not upsert) so the null vs. set episode scope stays
+// unambiguous; the partial unique indexes keep picks deduped.
+export function useToggleCharacterVote(
+  title: Pick<TitleDetail, 'id' | 'media_type'>,
+  episode?: { season: number; episode: number },
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { character: CharacterPick; voted: boolean }) => {
+      if (!supabase) throw new Error('Not configured')
+      if (args.voted) {
+        let del = supabase
+          .from('character_votes')
+          .delete()
+          .eq('tmdb_id', title.id)
+          .eq('media_type', title.media_type)
+          .eq('person_id', args.character.personId)
+        del = episode
+          ? del.eq('season_number', episode.season).eq('episode_number', episode.episode)
+          : del.is('season_number', null)
+        const { error } = await del
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('character_votes').insert({
+          tmdb_id: title.id,
+          media_type: title.media_type,
+          season_number: episode?.season ?? null,
+          episode_number: episode?.episode ?? null,
+          person_id: args.character.personId,
+          character_name: args.character.characterName,
+          actor_name: args.character.actorName,
+          profile_path: args.character.profilePath,
+        })
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      // Prefix match invalidates both the title-level and every episode scope.
+      qc.invalidateQueries({ queryKey: ['character-votes', title.media_type, title.id] })
+    },
+  })
+}
+
 // --- Stats ------------------------------------------------------------------
 
 export interface Stats {
