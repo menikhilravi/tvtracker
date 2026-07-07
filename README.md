@@ -136,6 +136,15 @@ screen**. It now launches full-screen like a native app.
 > Play Store fee is one-time and entirely optional — the home-screen install
 > above is free.
 
+### Optional — Android home-screen widget
+
+Android doesn't allow widgets from PWAs, so there's a tiny native companion
+app in [`android/`](android/README.md) that adds an **"Up next" home-screen
+widget**: your next unwatched episode per show, with a ✓ to log the watch
+right from the home screen. It talks to the same Supabase project, so it stays
+in sync with the app. Grab the APK from the *Android widget APK* GitHub
+Actions run (or build it yourself) — see [android/README.md](android/README.md).
+
 ---
 
 ## Import your TV Time data

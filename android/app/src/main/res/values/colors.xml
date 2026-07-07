@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the PWA's palette (src/index.css). -->
+    <color name="bg">#08080C</color>
+    <color name="surface">#14141F</color>
+    <color name="surface2">#1C1C2B</color>
+    <color name="line">#14FFFFFF</color>
+    <color name="brand">#E11D48</color>
+    <color name="brand2">#F43F5E</color>
+    <color name="ink">#F4F4F8</color>
+    <color name="muted">#9A9AB0</color>
+    <color name="faint">#62627A</color>
+    <color name="widget_bg">#EE0E0E16</color>
+</resources>
