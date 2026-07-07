@@ -5,7 +5,6 @@ name: Android widget APK
 
 on:
   push:
-    branches: [main]
     paths: ['android/**', '.github/workflows/android-widget.yml']
   pull_request:
     paths: ['android/**', '.github/workflows/android-widget.yml']
