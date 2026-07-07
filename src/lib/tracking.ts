@@ -447,63 +447,76 @@ export interface CharacterPick {
   profilePath: string | null
 }
 
-// The set of TMDB person ids the user has favorited for a title — title-level
-// when `episode` is omitted, or for a specific episode otherwise.
+// Which slice of a title a vote belongs to. Omitted → the whole title;
+// `{ season }` → one season; `{ season, episode }` → one episode.
+export type CharacterVoteScope = { season: number; episode?: number }
+
+// PostgREST filter for a scope, applied to both the read and the delete so
+// the title / season / episode rows never bleed into one another.
+function scopeFilter<Q extends { eq: (c: string, v: number) => Q; is: (c: string, v: null) => Q }>(
+  q: Q,
+  scope?: CharacterVoteScope,
+): Q {
+  if (!scope) return q.is('season_number', null).is('episode_number', null)
+  if (scope.episode == null) return q.eq('season_number', scope.season).is('episode_number', null)
+  return q.eq('season_number', scope.season).eq('episode_number', scope.episode)
+}
+
+function scopeKey(scope?: CharacterVoteScope): string {
+  if (!scope) return 'title'
+  return scope.episode == null ? `s${scope.season}` : `s${scope.season}e${scope.episode}`
+}
+
+// The set of TMDB person ids the user has favorited for a scope — the whole
+// title when `scope` is omitted, else that season or episode.
 export function useCharacterVotes(
   tmdbId: number,
   mediaType: MediaType,
-  episode?: { season: number; episode: number },
+  scope?: CharacterVoteScope,
 ) {
   const { session } = useAuth()
-  const scope = episode ? `${episode.season}-${episode.episode}` : 'title'
   return useQuery({
-    queryKey: ['character-votes', mediaType, tmdbId, scope],
+    queryKey: ['character-votes', mediaType, tmdbId, scopeKey(scope)],
     enabled: Boolean(supabase && session),
     queryFn: async () => {
-      let q = supabase!
+      const q = supabase!
         .from('character_votes')
         .select('person_id')
         .eq('tmdb_id', tmdbId)
         .eq('media_type', mediaType)
-      q = episode
-        ? q.eq('season_number', episode.season).eq('episode_number', episode.episode)
-        : q.is('season_number', null)
-      const { data, error } = await q
+      const { data, error } = await scopeFilter(q, scope)
       if (error) throw error
       return new Set((data as { person_id: number }[]).map((r) => r.person_id))
     },
   })
 }
 
-// Toggle a character as a favorite for a title or a specific episode. Uses
-// explicit insert/delete (not upsert) so the null vs. set episode scope stays
-// unambiguous; the partial unique indexes keep picks deduped.
+// Toggle a character as a favorite at a scope. Uses explicit insert/delete (not
+// upsert) so the null-vs-set season/episode scope stays unambiguous; the
+// partial unique indexes keep picks deduped.
 export function useToggleCharacterVote(
   title: Pick<TitleDetail, 'id' | 'media_type'>,
-  episode?: { season: number; episode: number },
+  scope?: CharacterVoteScope,
 ) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (args: { character: CharacterPick; voted: boolean }) => {
       if (!supabase) throw new Error('Not configured')
       if (args.voted) {
-        let del = supabase
+        const del = supabase
           .from('character_votes')
           .delete()
           .eq('tmdb_id', title.id)
           .eq('media_type', title.media_type)
           .eq('person_id', args.character.personId)
-        del = episode
-          ? del.eq('season_number', episode.season).eq('episode_number', episode.episode)
-          : del.is('season_number', null)
-        const { error } = await del
+        const { error } = await scopeFilter(del, scope)
         if (error) throw error
       } else {
         const { error } = await supabase.from('character_votes').insert({
           tmdb_id: title.id,
           media_type: title.media_type,
-          season_number: episode?.season ?? null,
-          episode_number: episode?.episode ?? null,
+          season_number: scope?.season ?? null,
+          episode_number: scope?.episode ?? null,
           person_id: args.character.personId,
           character_name: args.character.characterName,
           actor_name: args.character.actorName,
@@ -513,7 +526,7 @@ export function useToggleCharacterVote(
       }
     },
     onSuccess: () => {
-      // Prefix match invalidates both the title-level and every episode scope.
+      // Prefix match invalidates every scope (title, season, episode) for this title.
       qc.invalidateQueries({ queryKey: ['character-votes', title.media_type, title.id] })
     },
   })

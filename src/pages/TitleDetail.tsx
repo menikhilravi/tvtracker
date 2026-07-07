@@ -23,7 +23,16 @@ import {
   useCharacterVotes,
   useToggleCharacterVote,
   type FollowStatus,
+  type CharacterVoteScope,
 } from '../lib/tracking'
+
+// TMDB air dates are YYYY-MM-DD (UTC). An episode/season counts as released
+// once its air date is today or earlier.
+function hasAired(airDate: string | null): boolean {
+  if (!airDate) return false
+  const t = Date.parse(`${airDate}T00:00:00Z`)
+  return !Number.isNaN(t) && t <= Date.now()
+}
 
 // The user-facing status options, in the order shown in the picker.
 const STATUS_OPTIONS: { value: FollowStatus; label: string }[] = [
@@ -537,27 +546,39 @@ function RatingSection({ title }: { title: TitleDetailType }) {
         </button>
       )}
 
-      <FavoriteCharacters cast={title.cast} tmdbId={title.id} mediaType={title.media_type} />
+      {/* A title-level favorite is your pick for the whole thing: a movie any
+          time, but a series only once it has ended (before that, vote per
+          released episode / completed season below). */}
+      {title.media_type === 'tv' && !title.ended ? (
+        <p className="mt-4 border-t border-line pt-4 text-xs text-faint">
+          Favorite characters for the whole series unlock when it ends — until then,
+          vote on released episodes and completed seasons.
+        </p>
+      ) : (
+        <FavoriteCharacters cast={title.cast} tmdbId={title.id} mediaType={title.media_type} />
+      )}
     </div>
   )
 }
 
 // A compact cast rail where you tap a character to favorite it. Scoped to the
-// whole title, or to a single episode when `episode` is passed. Sign-in is
-// assumed by callers (both the review card and the episode modal gate on it).
+// whole title, one season, or one episode via `scope`. Sign-in is assumed by
+// callers (the review card, season panel, and episode modal all gate on it).
 function FavoriteCharacters({
   cast,
   tmdbId,
   mediaType,
-  episode,
+  scope,
+  heading = 'Favorite characters',
 }: {
   cast: TitleDetailType['cast']
   tmdbId: number
   mediaType: MediaType
-  episode?: { season: number; episode: number }
+  scope?: CharacterVoteScope
+  heading?: string
 }) {
-  const votes = useCharacterVotes(tmdbId, mediaType, episode)
-  const toggle = useToggleCharacterVote({ id: tmdbId, media_type: mediaType }, episode)
+  const votes = useCharacterVotes(tmdbId, mediaType, scope)
+  const toggle = useToggleCharacterVote({ id: tmdbId, media_type: mediaType }, scope)
   const voted = votes.data ?? new Set<number>()
 
   if (cast.length === 0) return null
@@ -565,7 +586,7 @@ function FavoriteCharacters({
   return (
     <div className="mt-4 border-t border-line pt-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-medium text-muted">Favorite characters</span>
+        <span className="text-sm font-medium text-muted">{heading}</span>
         {voted.size > 0 && <span className="text-[11px] text-faint">{voted.size} picked</span>}
       </div>
       <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
@@ -750,6 +771,8 @@ function SeasonEpisodes({
 
   const epNumbers = episodes.map((e) => e.episodeNumber)
   const allWatched = episodes.every((e) => watchedSet.has(`S${e.seasonNumber}E${e.episodeNumber}`))
+  // Season-level favorites unlock once every listed episode has aired.
+  const seasonComplete = episodes.every((e) => hasAired(e.airDate))
 
   return (
     <div className="border-t border-line">
@@ -804,6 +827,18 @@ function SeasonEpisodes({
           )
         })}
       </ul>
+
+      {session && seasonComplete && (
+        <div className="px-3 pb-3">
+          <FavoriteCharacters
+            cast={show.cast}
+            tmdbId={show.id}
+            mediaType={show.media_type}
+            scope={{ season: seasonNumber }}
+            heading="Favorite characters this season"
+          />
+        </div>
+      )}
 
       {openEp && (
         <EpisodeModal
@@ -904,12 +939,18 @@ function EpisodeModal({
               {watched ? '✓ Watched — tap to unmark' : 'Mark watched'}
             </button>
 
-            <FavoriteCharacters
-              cast={show.cast}
-              tmdbId={show.id}
-              mediaType={show.media_type}
-              episode={{ season: episode.seasonNumber, episode: episode.episodeNumber }}
-            />
+            {hasAired(episode.airDate) ? (
+              <FavoriteCharacters
+                cast={show.cast}
+                tmdbId={show.id}
+                mediaType={show.media_type}
+                scope={{ season: episode.seasonNumber, episode: episode.episodeNumber }}
+              />
+            ) : (
+              <p className="mt-4 border-t border-line pt-4 text-xs text-faint">
+                Favorite-character vote opens once this episode airs.
+              </p>
+            )}
           </div>
         )}
       </div>
