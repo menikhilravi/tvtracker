@@ -20,8 +20,19 @@ import {
   useToggleEpisode,
   useToggleSeason,
   useRating,
+  useCharacterVotes,
+  useToggleCharacterVote,
   type FollowStatus,
+  type CharacterVoteScope,
 } from '../lib/tracking'
+
+// TMDB air dates are YYYY-MM-DD (UTC). An episode/season counts as released
+// once its air date is today or earlier.
+function hasAired(airDate: string | null): boolean {
+  if (!airDate) return false
+  const t = Date.parse(`${airDate}T00:00:00Z`)
+  return !Number.isNaN(t) && t <= Date.now()
+}
 
 // The user-facing status options, in the order shown in the picker.
 const STATUS_OPTIONS: { value: FollowStatus; label: string }[] = [
@@ -534,6 +545,97 @@ function RatingSection({ title }: { title: TitleDetailType }) {
           + Add a review
         </button>
       )}
+
+      {/* A title-level favorite is your pick for the whole thing: a movie any
+          time, but a series only once it has ended (before that, vote per
+          released episode / completed season below). */}
+      {title.media_type === 'tv' && !title.ended ? (
+        <p className="mt-4 border-t border-line pt-4 text-xs text-faint">
+          Favorite characters for the whole series unlock when it ends — until then,
+          vote on released episodes and completed seasons.
+        </p>
+      ) : (
+        <FavoriteCharacters cast={title.cast} tmdbId={title.id} mediaType={title.media_type} />
+      )}
+    </div>
+  )
+}
+
+// A compact cast rail where you tap a character to favorite it. Scoped to the
+// whole title, one season, or one episode via `scope`. Sign-in is assumed by
+// callers (the review card, season panel, and episode modal all gate on it).
+function FavoriteCharacters({
+  cast,
+  tmdbId,
+  mediaType,
+  scope,
+  heading = 'Favorite characters',
+}: {
+  cast: TitleDetailType['cast']
+  tmdbId: number
+  mediaType: MediaType
+  scope?: CharacterVoteScope
+  heading?: string
+}) {
+  const votes = useCharacterVotes(tmdbId, mediaType, scope)
+  const toggle = useToggleCharacterVote({ id: tmdbId, media_type: mediaType }, scope)
+  const voted = votes.data ?? new Set<number>()
+
+  if (cast.length === 0) return null
+
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium text-muted">{heading}</span>
+        {voted.size > 0 && <span className="text-[11px] text-faint">{voted.size} picked</span>}
+      </div>
+      <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+        {cast.map((c) => {
+          const isVoted = voted.has(c.id)
+          const label = c.character || c.name
+          return (
+            <button
+              key={c.id}
+              onClick={() =>
+                toggle.mutate({
+                  character: {
+                    personId: c.id,
+                    characterName: c.character || null,
+                    actorName: c.name || null,
+                    profilePath: c.profilePath,
+                  },
+                  voted: isVoted,
+                })
+              }
+              disabled={toggle.isPending}
+              aria-pressed={isVoted}
+              aria-label={`${isVoted ? 'Unfavorite' : 'Favorite'} ${label}`}
+              className="w-16 shrink-0 text-center active:scale-[0.97] disabled:opacity-60"
+            >
+              <div className="relative mx-auto h-16 w-16">
+                <Poster
+                  path={c.profilePath}
+                  alt={c.name}
+                  size="w200"
+                  rounded="rounded-full"
+                  className={`h-16 w-16 ${isVoted ? 'ring-2 ring-brand' : ''}`}
+                />
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 grid h-6 w-6 place-items-center rounded-full text-xs shadow ${
+                    isVoted
+                      ? 'bg-brand-gradient text-white'
+                      : 'bg-surface-2 text-muted ring-1 ring-line'
+                  }`}
+                >
+                  {isVoted ? '♥' : '♡'}
+                </span>
+              </div>
+              <p className="mt-1.5 truncate text-[11px] font-medium">{label}</p>
+              {c.character && <p className="truncate text-[10px] text-faint">{c.name}</p>}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -669,6 +771,8 @@ function SeasonEpisodes({
 
   const epNumbers = episodes.map((e) => e.episodeNumber)
   const allWatched = episodes.every((e) => watchedSet.has(`S${e.seasonNumber}E${e.episodeNumber}`))
+  // Season-level favorites unlock once every listed episode has aired.
+  const seasonComplete = episodes.every((e) => hasAired(e.airDate))
 
   return (
     <div className="border-t border-line">
@@ -723,6 +827,18 @@ function SeasonEpisodes({
           )
         })}
       </ul>
+
+      {session && seasonComplete && (
+        <div className="px-3 pb-3">
+          <FavoriteCharacters
+            cast={show.cast}
+            tmdbId={show.id}
+            mediaType={show.media_type}
+            scope={{ season: seasonNumber }}
+            heading="Favorite characters this season"
+          />
+        </div>
+      )}
 
       {openEp && (
         <EpisodeModal
@@ -822,6 +938,19 @@ function EpisodeModal({
             >
               {watched ? '✓ Watched — tap to unmark' : 'Mark watched'}
             </button>
+
+            {hasAired(episode.airDate) ? (
+              <FavoriteCharacters
+                cast={show.cast}
+                tmdbId={show.id}
+                mediaType={show.media_type}
+                scope={{ season: episode.seasonNumber, episode: episode.episodeNumber }}
+              />
+            ) : (
+              <p className="mt-4 border-t border-line pt-4 text-xs text-faint">
+                Favorite-character vote opens once this episode airs.
+              </p>
+            )}
           </div>
         )}
       </div>

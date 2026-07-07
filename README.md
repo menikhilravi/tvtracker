@@ -12,6 +12,7 @@ A personal, self-owned **TV & movie tracker** — a free replacement for TV Time
 - 📄 Detail screen: poster, overview, cast, seasons/episodes
 - ➕ Track a title (watchlist → watching → completed) and remove
 - 👁 Mark a **movie** watched; toggle individual **episodes** watched
+- ⭐ Rate & review a title or episode, and 💜 vote for your **favorite characters**
 - 🏠 Home shelves: *Watching* and *Watchlist*
 - 🔐 Email + password sign-in
 - 📲 Installable + offline shell + cached posters
@@ -50,10 +51,12 @@ npm install
 ### Step 4 — Create the database tables
 
 1. In your Supabase project, open the **SQL Editor**.
-2. Open the file [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
-   from this repo, copy its entire contents, paste into the SQL Editor, and
-   click **Run**. You should see "Success". (This creates the tables and the
-   security rules that keep your data private.)
+2. Open the files in [`supabase/migrations/`](supabase/migrations/) and run
+   them **in numeric order** (`0001_init.sql` first, then `0002…`, `0003…`, and
+   so on): copy each file's entire contents into the SQL Editor and click
+   **Run**. `0001` creates the core tables and the security rules that keep
+   your data private; the later files add features (per-episode ratings,
+   favorite-character votes, …). You should see "Success" after each.
 
 ### Step 5 — Deploy the TMDB proxy (hides your token)
 
@@ -135,6 +138,15 @@ screen**. It now launches full-screen like a native app.
 > Optional, later: wrap it as a real Play Store app with Bubblewrap/TWA. The $25
 > Play Store fee is one-time and entirely optional — the home-screen install
 > above is free.
+
+### Optional — Android home-screen widget
+
+Android doesn't allow widgets from PWAs, so there's a tiny native companion
+app in [`android/`](android/README.md) that adds an **"Up next" home-screen
+widget**: your next unwatched episode per show, with a ✓ to log the watch
+right from the home screen. It talks to the same Supabase project, so it stays
+in sync with the app. Grab the APK from the *Android widget APK* GitHub
+Actions run (or build it yourself) — see [android/README.md](android/README.md).
 
 ---
 
@@ -257,13 +269,14 @@ src/
     tmdb.ts        TMDB proxy client (normalized shapes)
     supabase.ts    Supabase client (null-safe if unconfigured)
     auth.tsx       AuthProvider + useAuth (email + password)
-    tracking.ts    follows / episode+movie watches / ratings hooks
+    tracking.ts    follows / episode+movie watches / ratings / character-vote hooks
     types.ts       shared types
     queryClient.ts TanStack Query config
   components/       Layout (bottom nav), Poster
   pages/            Home, Search, TitleDetail, Profile
 supabase/
   migrations/0001_init.sql     schema + Row-Level Security
+  migrations/…                 feature migrations (ratings, character votes, …)
   functions/tmdb-proxy/        allowlisted TMDB proxy (Deno)
   config.toml
 ```

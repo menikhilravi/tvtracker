@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TV Tracker Widget</string>
+    <string name="widget_label">Up next</string>
+    <string name="widget_description">Your next unwatched episodes, right on the home screen.</string>
+
+    <!-- Widget chrome -->
+    <string name="widget_title">Up next</string>
+    <string name="widget_signed_out">Tap to sign in</string>
+    <string name="widget_syncing">Syncing…</string>
+    <string name="widget_updated">Updated %1$s</string>
+    <string name="widget_caught_up">All caught up 🎉</string>
+    <string name="widget_sign_in_hint">Open TV Tracker Widget and sign in to see your shows.</string>
+    <string name="widget_refresh">Refresh</string>
+    <string name="row_mark_watched">Mark watched</string>
+
+    <!-- Row actions -->
+    <string name="marked_watched">Marked S%1$d · E%2$d watched</string>
+    <string name="open_failed">Couldn\'t open %1$s</string>
+
+    <!-- Settings screen -->
+    <string name="settings_intro">Connect to the same Supabase project as your TV Tracker web app (the values from its .env), then sign in with your TV Tracker account. Afterwards, long-press your home screen → Widgets → TV Tracker to add the widget.</string>
+    <string name="hint_supabase_url">Supabase URL (https://xyz.supabase.co)</string>
+    <string name="hint_anon_key">Supabase anon key</string>
+    <string name="hint_app_url">Web app URL for deep links (optional)</string>
+    <string name="hint_email">Email</string>
+    <string name="hint_password">Password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="re_sign_in">Re-sign in</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sync_now">Sync now</string>
+    <string name="sync_started">Sync started</string>
+    <string name="signed_in">Signed in</string>
+    <string name="fill_all_fields">Fill in the Supabase URL, anon key, email and password.</string>
+    <string name="status_signed_out">Not signed in.</string>
+    <string name="status_signing_in">Signing in…</string>
+    <string name="status_signed_in">Signed in as %1$s.</string>
+    <string name="status_signed_in_synced">Signed in as %1$s.\nLast sync: %2$s.</string>
+    <string name="status_error">Sign-in failed: %1$s</string>
+</resources>
