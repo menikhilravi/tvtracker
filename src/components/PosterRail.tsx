@@ -1,21 +1,21 @@
 import { Link } from 'react-router-dom'
 import type { SearchResult } from '../lib/types'
+import { trackedKey, type FollowStatus } from '../lib/tracking'
 import { Poster } from './Poster'
-
-// The key format shared by rails to mark titles already in the user's library.
-export const trackedKey = (mediaType: string, id: number) => `${mediaType}-${id}`
+import { PosterStatusBadge, isSettled } from './StatusBadge'
 
 // A horizontal, snap-scrolling rail of titles (used for Trending / discovery).
-// Pass `trackedIds` (a set of `trackedKey(...)`) to dim and badge titles the
-// user already tracks, so discovery surfaces mostly new things.
+// Pass `statusByKey` (see useFollowStatusMap) to badge titles already in the
+// user's library with what they are to them — watching, watchlist, finished —
+// rather than a flat "tracked".
 export function PosterRail({
   title,
   items,
-  trackedIds,
+  statusByKey,
 }: {
   title: string
   items: SearchResult[]
-  trackedIds?: Set<string>
+  statusByKey?: Map<string, FollowStatus>
 }) {
   if (items.length === 0) return null
   return (
@@ -23,7 +23,7 @@ export function PosterRail({
       <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">{title}</h2>
       <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
         {items.map((r) => {
-          const isTracked = trackedIds?.has(trackedKey(r.media_type, r.id))
+          const status = statusByKey?.get(trackedKey(r.media_type, r.id))
           return (
             <Link
               key={`${r.media_type}-${r.id}`}
@@ -36,14 +36,10 @@ export function PosterRail({
                   alt={r.title}
                   size="w342"
                   className={`aspect-[2/3] w-28 shadow-lg shadow-black/40 ${
-                    isTracked ? 'opacity-55' : ''
+                    isSettled(status) ? 'opacity-55' : ''
                   }`}
                 />
-                {isTracked && (
-                  <span className="absolute left-1.5 top-1.5 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
-                    ✓ Tracked
-                  </span>
-                )}
+                <PosterStatusBadge status={status} mediaType={r.media_type} />
               </div>
               <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.title}</p>
             </Link>

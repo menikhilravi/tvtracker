@@ -10,6 +10,7 @@ import {
   useCachedTitles,
   useDetailCoverage,
   watchedMovieIds,
+  statsFollows,
   airedProgress,
   titleKey,
   FALLBACK_EPISODE_MINUTES,
@@ -76,10 +77,14 @@ function StatsSection() {
   const timeValue = hours >= 48 ? days.toFixed(1) : String(hours)
   const timeUnit = hours >= 48 ? 'days' : 'hours'
 
+  // All three are "how much have I watched" counts over the same population as
+  // the per-media tabs below, so the two sections can't contradict each other.
+  // "Finished" used to add shows and movies together, which made it larger than
+  // the movie count sitting next to it.
   const tiles = [
     { icon: '📺', label: 'Episodes', value: stats.episodesWatched },
     { icon: '🎬', label: 'Movies', value: stats.moviesWatched },
-    { icon: '✓', label: 'Finished', value: stats.completed },
+    { icon: '✓', label: 'Shows done', value: stats.showsFinished },
   ]
 
   return (
@@ -279,8 +284,15 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 function TvStats() {
   const follows = useFollows()
   const epWatches = useAllEpisodeWatches()
+  const watchIds = useWatchedMovieIds()
   const cached = useCachedTitles()
-  const tvFollows = (follows.data ?? []).filter((f) => f.media_type === 'tv')
+  // statsFollows, not the raw library — see its comment. The summary tiles count
+  // the same population, so the two sections always agree.
+  const tvFollows = statsFollows(
+    follows.data ?? [],
+    epWatches.data ?? new Map(),
+    watchIds.data ?? new Set(),
+  ).filter((f) => f.media_type === 'tv')
 
   // Only shows you're actively watching still need a live fetch — "episodes
   // left" counts against *aired* episodes and the upcoming chart needs the next
@@ -303,7 +315,11 @@ function TvStats() {
   // behind a warm TMDB cache used to render tiles from an empty watch map,
   // which showed 0 watched and every episode as "remaining".
   const loading =
-    follows.isLoading || epWatches.isLoading || cached.isLoading || details.some((d) => d.isLoading)
+    follows.isLoading ||
+    epWatches.isLoading ||
+    watchIds.isLoading ||
+    cached.isLoading ||
+    details.some((d) => d.isLoading)
   if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
   if (tvFollows.length === 0) return null
 
@@ -364,14 +380,21 @@ function TvStats() {
 function MovieStats() {
   const follows = useFollows()
   const watchIds = useWatchedMovieIds()
+  const epWatches = useAllEpisodeWatches()
   const cached = useCachedTitles()
-  const movieFollows = (follows.data ?? []).filter((f) => f.media_type === 'movie')
+  // See TvStats — same population as the summary tiles.
+  const movieFollows = statsFollows(
+    follows.data ?? [],
+    epWatches.data ?? new Map(),
+    watchIds.data ?? new Set(),
+  ).filter((f) => f.media_type === 'movie')
 
   // Everything here — runtime, genres, release date — is stable, so once the
   // library is synced this section makes no TMDB requests at all.
   // See TvStats: wait for the watch set too, or a warm cache renders the tiles
   // against an empty set and reports every movie as unwatched.
-  const loading = follows.isLoading || watchIds.isLoading || cached.isLoading
+  const loading =
+    follows.isLoading || watchIds.isLoading || epWatches.isLoading || cached.isLoading
   if (loading) return <StatsSectionSkeleton icon="🎬" label="Movies" tiles={4} />
   if (movieFollows.length === 0) return null
 

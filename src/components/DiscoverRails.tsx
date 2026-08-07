@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   getTrending,
@@ -9,19 +9,15 @@ import {
   discoverByLanguage,
 } from '../lib/tmdb'
 import type { MediaType } from '../lib/types'
-import { useFollows } from '../lib/tracking'
+import { useFollowStatusMap, type FollowStatus } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
-import { PosterRail, trackedKey } from './PosterRail'
+import { PosterRail } from './PosterRail'
 
 // The full discovery surface shown on the Search empty state: fixed shelves
-// (trending / popular / top-rated) plus a genre browser. Titles the user
-// already tracks are dimmed via `trackedIds`.
+// (trending / popular / top-rated) plus a genre browser. Titles already in the
+// user's library are badged with their status via `statusByKey`.
 export function DiscoverRails() {
-  const { data: follows } = useFollows()
-  const trackedIds = useMemo(
-    () => new Set((follows ?? []).map((f) => trackedKey(f.media_type, f.tmdb_id))),
-    [follows],
-  )
+  const statusByKey = useFollowStatusMap()
 
   const trending = useQuery({ queryKey: ['trending', 'week'], queryFn: () => getTrending('week') })
   const popularTv = useQuery({ queryKey: ['popular', 'tv'], queryFn: () => getPopular('tv') })
@@ -31,13 +27,13 @@ export function DiscoverRails() {
 
   return (
     <div>
-      <PosterRail title="Trending this week" items={trending.data ?? []} trackedIds={trackedIds} />
-      <PosterRail title="Popular shows" items={popularTv.data ?? []} trackedIds={trackedIds} />
-      <PosterRail title="Popular movies" items={popularMovie.data ?? []} trackedIds={trackedIds} />
-      <PosterRail title="Top rated shows" items={topTv.data ?? []} trackedIds={trackedIds} />
-      <PosterRail title="Top rated movies" items={topMovie.data ?? []} trackedIds={trackedIds} />
-      <GenreBrowse trackedIds={trackedIds} />
-      <LanguageBrowse trackedIds={trackedIds} />
+      <PosterRail title="Trending this week" items={trending.data ?? []} statusByKey={statusByKey} />
+      <PosterRail title="Popular shows" items={popularTv.data ?? []} statusByKey={statusByKey} />
+      <PosterRail title="Popular movies" items={popularMovie.data ?? []} statusByKey={statusByKey} />
+      <PosterRail title="Top rated shows" items={topTv.data ?? []} statusByKey={statusByKey} />
+      <PosterRail title="Top rated movies" items={topMovie.data ?? []} statusByKey={statusByKey} />
+      <GenreBrowse statusByKey={statusByKey} />
+      <LanguageBrowse statusByKey={statusByKey} />
     </div>
   )
 }
@@ -65,7 +61,7 @@ const LANGUAGES: { code: string; name: string }[] = [
   { code: 'fr', name: 'French' },
 ]
 
-function LanguageBrowse({ trackedIds }: { trackedIds: Set<string> }) {
+function LanguageBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus> }) {
   const [mediaType, setMediaType] = usePersistedState<MediaType>('discover:langMedia', 'movie')
   // Persisted, defaults to Telugu so regional films show without any tapping.
   const [lang, setLang] = usePersistedState<string | null>('discover:lang', 'te')
@@ -116,14 +112,14 @@ function LanguageBrowse({ trackedIds }: { trackedIds: Set<string> }) {
         <PosterRail
           title={`Popular in ${selected.name}`}
           items={results ?? []}
-          trackedIds={trackedIds}
+          statusByKey={statusByKey}
         />
       )}
     </section>
   )
 }
 
-function GenreBrowse({ trackedIds }: { trackedIds: Set<string> }) {
+function GenreBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus> }) {
   const [mediaType, setMediaType] = useState<MediaType>('tv')
   const [genreId, setGenreId] = useState<number | null>(null)
 
@@ -180,7 +176,7 @@ function GenreBrowse({ trackedIds }: { trackedIds: Set<string> }) {
       </div>
 
       {selected && (
-        <PosterRail title={`Best ${selected.name}`} items={results ?? []} trackedIds={trackedIds} />
+        <PosterRail title={`Best ${selected.name}`} items={results ?? []} statusByKey={statusByKey} />
       )}
     </section>
   )

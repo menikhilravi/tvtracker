@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getTitle, getSeason, getSimilarTitles, getCollection, IMG } from '../lib/tmdb'
 import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
 import { Poster } from '../components/Poster'
-import { PosterRail, trackedKey } from '../components/PosterRail'
+import { PosterRail } from '../components/PosterRail'
 import { RatingStars } from '../components/RatingStars'
 import { useAuth } from '../lib/auth'
 import { useWatchRegion } from '../lib/region'
@@ -12,6 +12,7 @@ import type { WatchProvider } from '../lib/types'
 import {
   useFollow,
   useFollows,
+  useFollowStatusMap,
   useWatchedMovieIds,
   watchedMovieIds,
   useMarkMovieWatched,
@@ -252,12 +253,8 @@ function MoreLikeThis({ title }: { title: TitleDetailType }) {
         genreIds: title.genreIds,
       }),
   })
-  const { data: follows } = useFollows()
-  const tracked = useMemo(
-    () => new Set((follows ?? []).map((f) => trackedKey(f.media_type, f.tmdb_id))),
-    [follows],
-  )
-  return <PosterRail title="More like this" items={data ?? []} trackedIds={tracked} />
+  const statusByKey = useFollowStatusMap()
+  return <PosterRail title="More like this" items={data ?? []} statusByKey={statusByKey} />
 }
 
 function Dot({ text }: { text: string }) {

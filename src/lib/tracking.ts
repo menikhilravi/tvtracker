@@ -3,6 +3,7 @@
 // When Supabase is not configured they no-op so the browse experience keeps
 // working.
 
+import { useMemo } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { useAuth } from './auth'
@@ -54,11 +55,14 @@ async function cacheTitle(t: CacheableTitle) {
   await supabase.from('titles').upsert(row, { onConflict: 'tmdb_id,media_type' })
 }
 
-// Logging a watch should start tracking a title as "watching". This promotes
-// only from watchlist or untracked — it never overrides completed/dropped, and
-// leaves an already-watching show alone. Returns true if the status changed.
-async function promoteToWatching(
+// Logging a watch should also put the title in your library — otherwise it is
+// watched but untracked, and every library-scoped count (the whole Stats page,
+// the Profile library) silently misses it. Promotes only from watchlist or
+// untracked: it never overrides completed/dropped, and leaves an already-
+// watching show alone. Returns true if the status changed.
+async function promoteFollow(
   show: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath'>,
+  to: FollowStatus = 'watching',
 ): Promise<boolean> {
   if (!supabase) return false
   const { data } = await supabase
@@ -73,7 +77,7 @@ async function promoteToWatching(
     {
       tmdb_id: show.id,
       media_type: show.media_type,
-      status: 'watching',
+      status: to,
       name: show.title,
       poster_path: show.posterPath,
       updated_at: new Date().toISOString(),
@@ -84,6 +88,22 @@ async function promoteToWatching(
 }
 
 export type FollowStatus = 'watchlist' | 'watching' | 'completed' | 'dropped'
+
+// The key format for looking a title up in the library by (type, id). Shared by
+// every view that badges results with your status.
+export const trackedKey = (mediaType: string, id: number) => `${mediaType}-${id}`
+
+// Your library status for every tracked title, keyed by `trackedKey`. Views that
+// badge search results / rails / filmographies read this instead of rebuilding
+// the same map each.
+export function useFollowStatusMap(): Map<string, FollowStatus> {
+  const { data } = useFollows()
+  return useMemo(() => {
+    const m = new Map<string, FollowStatus>()
+    for (const f of data ?? []) m.set(trackedKey(f.media_type, f.tmdb_id), f.status)
+    return m
+  }, [data])
+}
 
 export function useFollow(title: CacheableTitle) {
   const tmdbId = title.id
@@ -171,11 +191,17 @@ export function useMarkMovieWatched(title: TitleDetail) {
       if (!supabase) throw new Error('Not configured')
       await cacheTitle(title)
       await supabase.from('movie_watches').insert({ tmdb_movie_id: title.id })
+      // Watching a movie *is* finishing it, so logging one from search — where
+      // you never pressed Track — still adds it to the library. Without this it
+      // stayed watched-but-untracked and every library count skipped it.
+      await promoteFollow(title, 'completed')
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['history'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
       qc.invalidateQueries({ queryKey: ['movie-watches'] })
+      qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['follow', title.id, title.media_type] })
     },
   })
 }
@@ -279,7 +305,7 @@ export function useToggleEpisode(show: TitleDetail) {
           episode_number: args.episode,
         })
         // First watch of a not-started show → move it to "watching".
-        await promoteToWatching(show)
+        await promoteFollow(show)
       }
     },
     onSuccess: () => {
@@ -347,7 +373,7 @@ export function useRateEpisode(show: TitleDetail) {
         { tmdb_show_id: show.id, season_number: args.season, episode_number: args.episode },
         { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' },
       )
-      await promoteToWatching(show)
+      await promoteFollow(show)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['episode-ratings', show.id] })
@@ -386,7 +412,7 @@ export function useToggleSeason(show: TitleDetail) {
         await supabase
           .from('episode_watches')
           .upsert(rows, { onConflict: 'user_id,tmdb_show_id,season_number,episode_number' })
-        await promoteToWatching(show)
+        await promoteFollow(show)
       }
     },
     onSuccess: () => {
@@ -695,11 +721,43 @@ export function useSyncTitleDetails() {
 
 // --- Stats ------------------------------------------------------------------
 
+// The population every stat is counted over: your library, plus a stand-in for
+// anything you have watch history for but never tracked. Logging a movie from a
+// search result used to insert a watch with no follow row, so the summary tiles
+// (counted over watch history) and the per-media breakdowns (walked over the
+// library) reported different totals for the same thing. Both now walk this.
+export function statsFollows(
+  follows: FollowRow[],
+  epWatches: Map<number, Set<string>>,
+  movieWatchIds: Set<number>,
+): FollowRow[] {
+  const seen = new Set(follows.map((f) => titleKey(f.media_type, f.tmdb_id)))
+  const rows = [...follows]
+  const add = (tmdbId: number, mediaType: MediaType, status: FollowStatus) => {
+    const key = titleKey(mediaType, tmdbId)
+    if (seen.has(key)) return
+    seen.add(key)
+    rows.push({
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      status,
+      name: null,
+      poster_path: null,
+      updated_at: '',
+    })
+  }
+  for (const showId of epWatches.keys()) add(showId, 'tv', 'watching')
+  for (const id of movieWatchIds) add(id, 'movie', 'completed')
+  return rows
+}
+
 export interface Stats {
   episodesWatched: number
   moviesWatched: number
   showsTracked: number
-  completed: number
+  /** TV only — the Movies tile already covers movies, and mixing the two made
+   *  "finished" exceed the movie count and read as impossible. */
+  showsFinished: number
   /** Real runtimes where cached; flat averages for anything not yet synced. */
   estimatedMinutes: number
   /** How many watched titles fell back to an average — 0 means the total is exact. */
@@ -725,21 +783,20 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
     return { data: undefined, isLoading }
   }
 
-  const watched = watchedMovieIds(follows.data, movieWatches.data)
+  const all = statsFollows(follows.data, epWatches.data, movieWatches.data)
+  const watched = watchedMovieIds(all, movieWatches.data)
   let showsTracked = 0
-  let completed = 0
-  for (const f of follows.data) {
-    if (f.media_type === 'tv') {
-      showsTracked++
-      if (f.status === 'completed') completed++
-    } else if (watched.has(f.tmdb_id)) {
-      completed++
-    }
+  let showsFinished = 0
+  for (const f of all) {
+    if (f.media_type !== 'tv') continue
+    showsTracked++
+    if (f.status === 'completed') showsFinished++
   }
 
   const meta = cached.data
   let estimatedMinutes = 0
   let episodesWatched = 0
+  let moviesWatched = 0
   let unsyncedWatched = 0
   for (const [showId, eps] of epWatches.data) {
     // episode_watches is unique per (user, show, season, episode), so the set
@@ -749,8 +806,10 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
     if (!runtime) unsyncedWatched++
     estimatedMinutes += eps.size * (runtime || FALLBACK_EPISODE_MINUTES)
   }
-  for (const id of watched) {
-    const runtime = meta.get(titleKey('movie', id))?.runtime
+  for (const f of all) {
+    if (f.media_type !== 'movie' || !watched.has(f.tmdb_id)) continue
+    moviesWatched++
+    const runtime = meta.get(titleKey('movie', f.tmdb_id))?.runtime
     if (!runtime) unsyncedWatched++
     estimatedMinutes += runtime || FALLBACK_MOVIE_MINUTES
   }
@@ -758,9 +817,9 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
   return {
     data: {
       episodesWatched,
-      moviesWatched: watched.size,
+      moviesWatched,
       showsTracked,
-      completed,
+      showsFinished,
       estimatedMinutes,
       unsyncedWatched,
     },
