@@ -235,12 +235,13 @@ export function useWatchActivity() {
   })
 }
 
-// The set of TMDB movie ids the user has logged a watch for. Used to show
-// franchise progress ("seen 18/33").
-export function useWatchedMovieIds() {
+// How many times each movie has been logged. `movie_watches` has no unique key,
+// so a rewatch is simply another row — the count has always been in the data,
+// it just wasn't read.
+export function useMovieWatchCounts() {
   const { session } = useAuth()
   return useQuery({
-    queryKey: ['movie-watches', 'ids'],
+    queryKey: ['movie-watches', 'counts'],
     enabled: Boolean(supabase && session),
     queryFn: async () => {
       const rows = await fetchAllRows<{ tmdb_movie_id: number }>((from, to) =>
@@ -250,9 +251,23 @@ export function useWatchedMovieIds() {
           .order('id', { ascending: true })
           .range(from, to),
       )
-      return new Set(rows.map((r) => r.tmdb_movie_id))
+      const counts = new Map<number, number>()
+      for (const r of rows) counts.set(r.tmdb_movie_id, (counts.get(r.tmdb_movie_id) ?? 0) + 1)
+      return counts
     },
   })
+}
+
+// The set of TMDB movie ids the user has logged a watch for. Used to show
+// franchise progress ("seen 18/33"). Derived from the counts so both share one
+// fetch rather than reading the table twice.
+export function useWatchedMovieIds(): { data: Set<number> | undefined; isLoading: boolean } {
+  const counts = useMovieWatchCounts()
+  const data = useMemo(
+    () => (counts.data ? new Set(counts.data.keys()) : undefined),
+    [counts.data],
+  )
+  return { data, isLoading: counts.isLoading }
 }
 
 // Every movie the user has seen. Logging a watch and marking a movie
@@ -268,19 +283,69 @@ export function watchedMovieIds(follows: FollowRow[], watchRowIds: Set<number>):
   return ids
 }
 
-// Watched episodes for a show, as a Set of "S{n}E{n}" keys for quick lookup.
+// Watched episodes for a show: a Set of "S{n}E{n}" keys for quick lookup, plus
+// how many times each was watched (see migration 0007 — a rewatch increments a
+// counter rather than adding a row).
+export interface ShowWatches {
+  watched: Set<string>
+  plays: Map<string, number>
+}
+
+interface EpisodeWatchRow {
+  tmdb_show_id?: number
+  season_number: number
+  episode_number: number
+  play_count?: number | null
+}
+
+// `play_count` arrives with migration 0007. Selecting a column that doesn't
+// exist is a hard error, and episode lists and stats are core — so fall back to
+// the column set every install has. You lose rewatch counts, not the app.
+const EPISODE_COLS = 'season_number, episode_number'
+const EPISODE_COLS_PLAYS = `${EPISODE_COLS}, play_count`
+
 export function useEpisodeWatches(showId: number) {
   const { session } = useAuth()
   return useQuery({
     queryKey: ['episode-watches', showId],
     enabled: Boolean(supabase && session),
-    queryFn: async () => {
-      const { data, error } = await supabase!
-        .from('episode_watches')
-        .select('season_number, episode_number')
-        .eq('tmdb_show_id', showId)
+    queryFn: async (): Promise<ShowWatches> => {
+      const load = (columns: string) =>
+        supabase!.from('episode_watches').select(columns).eq('tmdb_show_id', showId)
+
+      let { data, error } = await load(EPISODE_COLS_PLAYS)
+      if (error) ({ data, error } = await load(EPISODE_COLS))
       if (error) throw error
-      return new Set(data.map((r) => `S${r.season_number}E${r.episode_number}`))
+
+      const watched = new Set<string>()
+      const plays = new Map<string, number>()
+      for (const r of (data ?? []) as unknown as EpisodeWatchRow[]) {
+        const key = `S${r.season_number}E${r.episode_number}`
+        watched.add(key)
+        plays.set(key, r.play_count ?? 1)
+      }
+      return { watched, plays }
+    },
+  })
+}
+
+// Log another viewing of an episode you've already seen. Increments in the
+// database rather than read-then-write, so two devices can't clobber each other.
+export function useRewatchEpisode(show: TitleDetail) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { season: number; episode: number }) => {
+      if (!supabase) throw new Error('Not configured')
+      const { error } = await supabase.rpc('log_episode_rewatch', {
+        p_show: show.id,
+        p_season: args.season,
+        p_episode: args.episode,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['episode-watches'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
     },
   })
 }
@@ -772,6 +837,7 @@ export interface Stats {
 export function useStats(): { data: Stats | undefined; isLoading: boolean } {
   const follows = useFollows()
   const movieWatches = useWatchedMovieIds()
+  const movieCountsQuery = useMovieWatchCounts()
   // Watch time is summed per show, not from a flat episode count, so a 22-min
   // sitcom and a 70-min drama no longer weigh the same.
   const epWatches = useAllEpisodeWatches()
@@ -783,7 +849,7 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
     return { data: undefined, isLoading }
   }
 
-  const all = statsFollows(follows.data, epWatches.data, movieWatches.data)
+  const all = statsFollows(follows.data, epWatches.data.byShow, movieWatches.data)
   const watched = watchedMovieIds(all, movieWatches.data)
   let showsTracked = 0
   let showsFinished = 0
@@ -794,24 +860,29 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
   }
 
   const meta = cached.data
+  const movieCounts = movieCountsQuery.data ?? new Map<number, number>()
   let estimatedMinutes = 0
   let episodesWatched = 0
   let moviesWatched = 0
   let unsyncedWatched = 0
-  for (const [showId, eps] of epWatches.data) {
-    // episode_watches is unique per (user, show, season, episode), so the set
-    // size is already the distinct episode count.
+  for (const [showId, eps] of epWatches.data.byShow) {
+    // "Episodes" counts distinct episodes — rewatching one doesn't mean you've
+    // seen more of the show. Time watched uses total plays, because it does
+    // mean you spent the hours again.
     episodesWatched += eps.size
     const runtime = meta.get(titleKey('tv', showId))?.episode_run_time
     if (!runtime) unsyncedWatched++
-    estimatedMinutes += eps.size * (runtime || FALLBACK_EPISODE_MINUTES)
+    const plays = epWatches.data.playsByShow.get(showId) ?? eps.size
+    estimatedMinutes += plays * (runtime || FALLBACK_EPISODE_MINUTES)
   }
   for (const f of all) {
     if (f.media_type !== 'movie' || !watched.has(f.tmdb_id)) continue
     moviesWatched++
     const runtime = meta.get(titleKey('movie', f.tmdb_id))?.runtime
     if (!runtime) unsyncedWatched++
-    estimatedMinutes += runtime || FALLBACK_MOVIE_MINUTES
+    // Likewise: each logged viewing is real time spent. A movie in the library
+    // with no logged watch (marked completed) still counts once.
+    estimatedMinutes += (movieCounts.get(f.tmdb_id) ?? 1) * (runtime || FALLBACK_MOVIE_MINUTES)
   }
 
   return {
@@ -873,31 +944,55 @@ export function useFollows() {
   })
 }
 
-// Every watched episode across all shows, as showId -> Set of "S{n}E{n}" keys.
+// Every watched episode across all shows.
+//  - byShow:      showId -> Set of "S{n}E{n}" keys. Distinct episodes, which is
+//                 what progress and "up next" care about.
+//  - playsByShow: showId -> total viewings including rewatches. Watch *time*
+//                 counts these, since watching a season twice really is twice
+//                 the hours.
+export interface AllWatches {
+  byShow: Map<number, Set<string>>
+  playsByShow: Map<number, number>
+}
+
 export function useAllEpisodeWatches() {
   const { session } = useAuth()
   return useQuery({
     queryKey: ['episode-watches', 'all'],
     enabled: Boolean(supabase && session),
-    queryFn: async () => {
-      const rows = await fetchAllRows<{
-        tmdb_show_id: number
-        season_number: number
-        episode_number: number
-      }>((from, to) =>
-        supabase!
-          .from('episode_watches')
-          .select('tmdb_show_id, season_number, episode_number')
-          .order('id', { ascending: true })
-          .range(from, to),
-      )
-      const map = new Map<number, Set<string>>()
-      for (const r of rows) {
-        const set = map.get(r.tmdb_show_id) ?? new Set<string>()
-        set.add(`S${r.season_number}E${r.episode_number}`)
-        map.set(r.tmdb_show_id, set)
+    queryFn: async (): Promise<AllWatches> => {
+      // See useEpisodeWatches: degrade to the pre-0007 columns rather than fail.
+      const load = (columns: string) =>
+        fetchAllRows<EpisodeWatchRow>(
+          (from, to) =>
+            supabase!
+              .from('episode_watches')
+              .select(columns)
+              .order('id', { ascending: true })
+              .range(from, to) as unknown as PromiseLike<{
+              data: EpisodeWatchRow[] | null
+              error: unknown
+            }>,
+        )
+      let rows: EpisodeWatchRow[]
+      try {
+        rows = await load(`tmdb_show_id, ${EPISODE_COLS_PLAYS}`)
+      } catch {
+        rows = await load(`tmdb_show_id, ${EPISODE_COLS}`)
       }
-      return map
+
+      const byShow = new Map<number, Set<string>>()
+      const playsByShow = new Map<number, number>()
+      for (const r of rows) {
+        // tmdb_show_id is optional on the shared row type (the per-show query
+        // doesn't select it); it's always present here.
+        const showId = r.tmdb_show_id as number
+        const set = byShow.get(showId) ?? new Set<string>()
+        set.add(`S${r.season_number}E${r.episode_number}`)
+        byShow.set(showId, set)
+        playsByShow.set(showId, (playsByShow.get(showId) ?? 0) + (r.play_count ?? 1))
+      }
+      return { byShow, playsByShow }
     },
   })
 }
@@ -989,7 +1084,7 @@ export function useLibrary() {
   const detailById = new Map<number, TitleDetail>()
   for (const d of details) if (d.data) detailById.set(d.data.id, d.data)
 
-  const epMap = epWatches.data ?? new Map<number, Set<string>>()
+  const epMap = epWatches.data?.byShow ?? new Map<number, Set<string>>()
   const items: LibraryItem[] = (follows.data ?? []).map((f) => ({
     ...f,
     category: categorize(f, detailById, epMap),

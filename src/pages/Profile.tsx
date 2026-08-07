@@ -4,9 +4,11 @@ import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
 import {
   useAllRatings,
+  useCachedTitles,
   useLibrary,
   useRemoveFollow,
   ratingKey,
+  titleKey,
   type LibraryCategory,
   type LibraryItem,
 } from '../lib/tracking'
@@ -293,7 +295,25 @@ function LibraryModal({
   const [sort, setSort] = usePersistedState<SortKey>(`lib:${storageKey}:sort`, 'recent')
   const [search, setSearch] = usePersistedState<string>(`lib:${storageKey}:search`, '')
   const [ratedOnly, setRatedOnly] = usePersistedState<boolean>(`lib:${storageKey}:ratedOnly`, false)
+  const [genre, setGenre] = usePersistedState<string>(`lib:${storageKey}:genre`, '')
   const scoreOf = (it: LibraryItem) => ratings?.get(ratingKey(it.media_type, it.tmdb_id))
+
+  // Genres come from the cached `titles` rows, so filtering the library by genre
+  // is one read rather than a TMDB fetch per title.
+  const { data: meta } = useCachedTitles()
+  const genresOf = (it: LibraryItem) =>
+    meta?.get(titleKey(it.media_type, it.tmdb_id))?.genres ?? []
+  const availableGenres = useMemo(() => {
+    const set = new Set<string>()
+    for (const it of items) for (const g of genresOf(it)) set.add(g)
+    return [...set].sort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, meta])
+  // A stale selection (genre no longer present in this list) acts as "any".
+  const activeGenre = availableGenres.includes(genre) ? genre : ''
+  // Titles with no cached detail can't match any genre, so say so rather than
+  // letting them silently vanish from a filtered list.
+  const withoutGenres = items.filter((it) => genresOf(it).length === 0).length
   const [editing, setEditing] = useState(false)
   const remove = useRemoveFollow()
   const scrollRef = useScrollMemory<HTMLDivElement>(`lib:${storageKey}:scroll`)
@@ -314,7 +334,8 @@ function LibraryModal({
   const base = items.filter(
     (it) =>
       (!q || (it.name ?? '').toLowerCase().includes(q)) &&
-      (!ratedOnly || scoreOf(it) !== undefined),
+      (!ratedOnly || scoreOf(it) !== undefined) &&
+      (!activeGenre || genresOf(it).includes(activeGenre)),
   )
   const ratedCount = items.filter((it) => scoreOf(it) !== undefined).length
   const counts = countsFor(base)
@@ -412,22 +433,49 @@ function LibraryModal({
           <span className="text-xs text-faint">
             {editing ? 'Tap ✕ to remove' : `${shown.length} shown`}
           </span>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.key} value={o.key}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            {availableGenres.length > 0 && (
+              <select
+                value={activeGenre}
+                onChange={(e) => setGenre(e.target.value)}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+              >
+                <option value="">Any genre</option>
+                {availableGenres.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            )}
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        {activeGenre && withoutGenres > 0 && (
+          <p className="mb-3 text-[11px] text-faint">
+            {withoutGenres} title{withoutGenres === 1 ? '' : 's'} have no genre data and can’t
+            match — sync them in Settings.
+          </p>
+        )}
 
         {shown.length === 0 ? (
           <p className="rounded-2xl border border-line bg-surface/60 px-4 py-6 text-center text-sm text-muted">
-            {q ? `No matches for “${search.trim()}”.` : 'Nothing here.'}
+            {q
+              ? `No matches for “${search.trim()}”.`
+              : activeGenre
+                ? `Nothing in ${activeGenre}.`
+                : 'Nothing here.'}
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-3 pb-6">

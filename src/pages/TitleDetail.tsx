@@ -14,12 +14,14 @@ import {
   useFollows,
   useFollowStatusMap,
   useWatchedMovieIds,
+  useMovieWatchCounts,
   watchedMovieIds,
   useMarkMovieWatched,
   useEpisodeWatches,
   useEpisodeRatings,
   useRateEpisode,
   useToggleEpisode,
+  useRewatchEpisode,
   useToggleSeason,
   useRating,
   useCharacterVotes,
@@ -381,6 +383,8 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
   const { session } = useAuth()
   const { status, setStatus, enabled } = useFollow(title)
   const markMovie = useMarkMovieWatched(title)
+  const { data: movieCounts } = useMovieWatchCounts()
+  const plays = title.media_type === 'movie' ? (movieCounts?.get(title.id) ?? 0) : 0
   const [justLogged, setJustLogged] = useState(false)
 
   if (!enabled || !session) {
@@ -400,7 +404,9 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
         >
           + Track
         </button>
-        {title.media_type === 'movie' && <MovieLogButton onLog={logMovie} justLogged={justLogged} />}
+        {title.media_type === 'movie' && (
+          <MovieLogButton onLog={logMovie} justLogged={justLogged} plays={plays} />
+        )}
       </div>
     )
   }
@@ -424,7 +430,9 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
             )
           })}
         </div>
-        {title.media_type === 'movie' && <MovieLogButton onLog={logMovie} justLogged={justLogged} />}
+        {title.media_type === 'movie' && (
+          <MovieLogButton onLog={logMovie} justLogged={justLogged} plays={plays} />
+        )}
       </div>
 
       <button
@@ -446,17 +454,29 @@ function TrackingBar({ title }: { title: TitleDetailType }) {
   }
 }
 
-function MovieLogButton({ onLog, justLogged }: { onLog: () => void; justLogged: boolean }) {
+// Each tap logs a viewing — `movie_watches` keeps one row per watch, so a
+// rewatch is just another row. The count makes that visible instead of the
+// button looking like an idempotent "mark watched".
+function MovieLogButton({
+  onLog,
+  justLogged,
+  plays,
+}: {
+  onLog: () => void
+  justLogged: boolean
+  plays: number
+}) {
+  const label = justLogged ? '✓ Logged' : plays > 0 ? `👁 ${plays}×` : '👁'
   return (
     <button
       onClick={onLog}
       className={`shrink-0 self-start rounded-2xl px-4 py-3 text-sm font-semibold transition active:scale-95 ${
         justLogged ? 'bg-watched text-bg' : 'border border-line bg-surface'
       }`}
-      title="Log a watch"
-      aria-label="Log a watch"
+      title={plays > 0 ? `Watched ${plays}× — log another` : 'Log a watch'}
+      aria-label={plays > 0 ? `Watched ${plays} times. Log another watch` : 'Log a watch'}
     >
-      {justLogged ? '✓ Logged' : '👁'}
+      {label}
     </button>
   )
 }
@@ -651,7 +671,8 @@ function Seasons({
 }) {
   const [open, setOpen] = useState<number | null>(deepLink?.season ?? null)
   const watches = useEpisodeWatches(show.id)
-  const watchedSet = watches.data ?? new Set<string>()
+  const watchedSet = watches.data?.watched ?? new Set<string>()
+  const playMap = watches.data?.plays ?? new Map<string, number>()
   const ratings = useEpisodeRatings(show.id)
   const ratingMap = ratings.data ?? new Map<string, number>()
 
@@ -693,6 +714,7 @@ function Seasons({
                   show={show}
                   seasonNumber={s.seasonNumber}
                   watchedSet={watchedSet}
+                  playMap={playMap}
                   ratingMap={ratingMap}
                   autoOpenEpisode={deepLink?.season === s.seasonNumber ? deepLink.episode : undefined}
                 />
@@ -737,12 +759,14 @@ function SeasonEpisodes({
   show,
   seasonNumber,
   watchedSet,
+  playMap,
   ratingMap,
   autoOpenEpisode,
 }: {
   show: TitleDetailType
   seasonNumber: number
   watchedSet: Set<string>
+  playMap: Map<string, number>
   ratingMap: Map<string, number>
   autoOpenEpisode?: number
 }) {
@@ -797,6 +821,7 @@ function SeasonEpisodes({
         {episodes.map((e) => {
           const key = `S${e.seasonNumber}E${e.episodeNumber}`
           const watched = watchedSet.has(key)
+          const plays = playMap.get(key) ?? 0
           const score = ratingMap.get(key)
           return (
             <li key={key} className="flex items-center gap-3 p-3">
@@ -813,6 +838,7 @@ function SeasonEpisodes({
                   {score !== undefined && (
                     <span className="font-semibold text-amber-400">★ {score}</span>
                   )}
+                  {plays > 1 && <span className="font-semibold text-watched">×{plays}</span>}
                 </div>
               </button>
               <button
@@ -847,6 +873,7 @@ function SeasonEpisodes({
           show={show}
           episode={openEp}
           watched={watchedSet.has(`S${openEp.seasonNumber}E${openEp.episodeNumber}`)}
+          plays={playMap.get(`S${openEp.seasonNumber}E${openEp.episodeNumber}`) ?? 0}
           score={ratingMap.get(`S${openEp.seasonNumber}E${openEp.episodeNumber}`) ?? null}
           onClose={() => setOpenEp(null)}
         />
@@ -861,18 +888,21 @@ function EpisodeModal({
   show,
   episode,
   watched,
+  plays,
   score,
   onClose,
 }: {
   show: TitleDetailType
   episode: Episode
   watched: boolean
+  plays: number
   score: number | null
   onClose: () => void
 }) {
   const { session } = useAuth()
   const rate = useRateEpisode(show)
   const toggle = useToggleEpisode(show)
+  const rewatch = useRewatchEpisode(show)
   const still = IMG(episode.stillPath, 'w500')
 
   // Close on Escape; lock background scroll while open.
@@ -940,6 +970,24 @@ function EpisodeModal({
             >
               {watched ? '✓ Watched — tap to unmark' : 'Mark watched'}
             </button>
+
+            {/* Rewatching is a separate action from unmarking: the toggle above
+                says "I haven't seen this", this says "I've seen it again". */}
+            {watched && (
+              <button
+                onClick={() =>
+                  rewatch.mutate({ season: episode.seasonNumber, episode: episode.episodeNumber })
+                }
+                disabled={rewatch.isPending}
+                className="mt-2 w-full rounded-xl border border-line bg-surface py-2.5 text-sm font-semibold text-muted transition active:scale-[0.98] disabled:opacity-50"
+              >
+                {rewatch.isPending
+                  ? '…'
+                  : plays > 1
+                    ? `↻ Watched ${plays}× — log another`
+                    : '↻ Log a rewatch'}
+              </button>
+            )}
 
             {hasAired(episode.airDate) ? (
               <FavoriteCharacters

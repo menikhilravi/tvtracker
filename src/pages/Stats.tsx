@@ -290,7 +290,7 @@ function TvStats() {
   // the same population, so the two sections always agree.
   const tvFollows = statsFollows(
     follows.data ?? [],
-    epWatches.data ?? new Map(),
+    epWatches.data?.byShow ?? new Map(),
     watchIds.data ?? new Set(),
   ).filter((f) => f.media_type === 'tv')
 
@@ -323,7 +323,7 @@ function TvStats() {
   if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
   if (tvFollows.length === 0) return null
 
-  const epMap = epWatches.data ?? new Map<number, Set<string>>()
+  const epMap = epWatches.data?.byShow ?? new Map<number, Set<string>>()
   const meta = cached.data ?? new Map<string, CachedTitle>()
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
   const detailById = new Map(resolved.map((d) => [d.id, d]))
@@ -341,7 +341,9 @@ function TvStats() {
     const w = epMap.get(f.tmdb_id)?.size ?? 0
     episodesWatched += w
     const m = meta.get(titleKey('tv', f.tmdb_id))
-    minutes += w * (m?.episode_run_time || FALLBACK_EPISODE_MINUTES)
+    // Distinct episodes for the count, total plays for the time — see useStats.
+    const plays = epWatches.data?.playsByShow.get(f.tmdb_id) ?? w
+    minutes += plays * (m?.episode_run_time || FALLBACK_EPISODE_MINUTES)
     for (const g of m?.genres ?? []) genres.set(g, (genres.get(g) ?? 0) + 1)
     for (const n of m?.networks ?? []) networks.set(n, (networks.get(n) ?? 0) + 1)
 
@@ -385,7 +387,7 @@ function MovieStats() {
   // See TvStats — same population as the summary tiles.
   const movieFollows = statsFollows(
     follows.data ?? [],
-    epWatches.data ?? new Map(),
+    epWatches.data?.byShow ?? new Map(),
     watchIds.data ?? new Set(),
   ).filter((f) => f.media_type === 'movie')
 

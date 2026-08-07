@@ -120,7 +120,7 @@ function UpNextCard({ row, view }: { row: WatchingRow; view: ViewMode }) {
       } as TitleDetail),
   )
 
-  const watchedSet = watches.data ?? new Set<string>()
+  const watchedSet = watches.data?.watched ?? new Set<string>()
   const nextUp = detail ? computeNextUp(detail, watchedSet) : null
   const progress = detail ? airedProgress(detail, watchedSet) : { done: 0, total: 0 }
 
