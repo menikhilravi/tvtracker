@@ -13,6 +13,7 @@ import {
   useFollow,
   useFollows,
   useWatchedMovieIds,
+  watchedMovieIds,
   useMarkMovieWatched,
   useEpisodeWatches,
   useEpisodeRatings,
@@ -183,12 +184,16 @@ function CollectionSection({ title }: { title: TitleDetailType }) {
     queryFn: () => getCollection(col!.id),
     enabled: Boolean(col),
   })
-  const { data: watched } = useWatchedMovieIds()
+  const { data: watchIds } = useWatchedMovieIds()
+  const { data: follows } = useFollows()
+  // Same rule as the stats page: marked completed counts as seen, not just a
+  // logged watch.
+  const watched = watchedMovieIds(follows ?? [], watchIds ?? new Set<number>())
 
   // A "collection" of one is just this movie — not worth a section.
   if (!col || !data || data.parts.length < 2) return null
 
-  const seen = data.parts.filter((p) => watched?.has(p.id)).length
+  const seen = data.parts.filter((p) => watched.has(p.id)).length
   const total = data.parts.length
   const pct = Math.round((seen / total) * 100)
 
@@ -203,7 +208,7 @@ function CollectionSection({ title }: { title: TitleDetailType }) {
       </div>
       <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
         {data.parts.map((p) => {
-          const isSeen = watched?.has(p.id)
+          const isSeen = watched.has(p.id)
           const isCurrent = p.id === title.id
           return (
             <Link

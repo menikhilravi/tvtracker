@@ -7,6 +7,8 @@ import {
   useFollows,
   useAllEpisodeWatches,
   useWatchedMovieIds,
+  watchedMovieIds,
+  airedProgress,
 } from '../lib/tracking'
 import { getTitle } from '../lib/tmdb'
 import type { TitleDetail } from '../lib/types'
@@ -241,9 +243,9 @@ const topN = (tally: Map<string, number>, n: number): [string, number][] =>
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
 function TvStats() {
-  const { data: follows } = useFollows()
+  const follows = useFollows()
   const epWatches = useAllEpisodeWatches()
-  const tvFollows = (follows ?? []).filter((f) => f.media_type === 'tv')
+  const tvFollows = (follows.data ?? []).filter((f) => f.media_type === 'tv')
 
   const details = useQueries({
     queries: tvFollows.map((f) => ({
@@ -257,21 +259,21 @@ function TvStats() {
     })),
   })
 
+  // Wait for the DB rows *and* the details to settle. Watch data loading a beat
+  // behind a warm TMDB cache used to render tiles from an empty watch map,
+  // which showed 0 watched and every episode as "remaining".
+  const loading = follows.isLoading || epWatches.isLoading || details.some((d) => d.isLoading)
+  if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
   if (tvFollows.length === 0) return null
 
-  const statusById = new Map(tvFollows.map((f) => [f.tmdb_id, f.status]))
   const epMap = epWatches.data ?? new Map<number, Set<string>>()
   const watchedIn = (id: number) => epMap.get(id)?.size ?? 0
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
   const detailById = new Map(resolved.map((d) => [d.id, d]))
-  const loading = details.some((d) => d.isLoading)
-
-  // Wait for details to settle so the numbers don't visibly climb from 0.
-  if (loading) return <StatsSectionSkeleton icon="📺" label="TV Shows" tiles={4} />
 
   // Hard counts come straight from the paginated DB data (epMap), so they stay
   // exact and stable even if some per-title TMDB detail fetches fail. Details
-  // only refine the estimates (runtime → time, episode totals → remaining) and
+  // only refine the estimates (runtime → time, aired totals → remaining) and
   // the genre/network breakdowns.
   let minutes = 0
   let remaining = 0
@@ -283,8 +285,14 @@ function TvStats() {
     episodesWatched += w
     const d = detailById.get(f.tmdb_id)
     minutes += w * (d?.episodeRunTime || 40)
-    if (statusById.get(f.tmdb_id) === 'watching' && d) {
-      remaining += Math.max(0, (d.numberOfEpisodes ?? 0) - w)
+    // Episodes left on shows you're mid-way through. Counted against *aired*
+    // episodes via the same helper the detail page's progress bar uses —
+    // numberOfEpisodes includes unaired episodes and excludes specials, so
+    // subtracting the raw watch count double-counted both ways and inflated
+    // this badly on a large library.
+    if (f.status === 'watching' && d) {
+      const p = airedProgress(d, epMap.get(f.tmdb_id) ?? new Set())
+      remaining += Math.max(0, p.total - p.done)
     }
   }
   for (const d of resolved) {
@@ -303,7 +311,7 @@ function TvStats() {
         <StatTile icon="📺" value={tvFollows.length} label="shows" />
         <TimeTile value={time.value} unit={time.unit} />
         <StatTile icon="✓" value={episodesWatched} label="episodes" />
-        <StatTile icon="⏳" value={remaining} label="remaining" />
+        <StatTile icon="⏳" value={remaining} label="episodes left" />
       </div>
       <BarList title="Top genres" items={topN(genres, 5)} />
       <BarList title="Top networks" items={topN(networks, 5)} />
@@ -313,9 +321,9 @@ function TvStats() {
 }
 
 function MovieStats() {
-  const { data: follows } = useFollows()
-  const watchedIds = useWatchedMovieIds()
-  const movieFollows = (follows ?? []).filter((f) => f.media_type === 'movie')
+  const follows = useFollows()
+  const watchIds = useWatchedMovieIds()
+  const movieFollows = (follows.data ?? []).filter((f) => f.media_type === 'movie')
 
   const details = useQueries({
     queries: movieFollows.map((f) => ({
@@ -328,26 +336,30 @@ function MovieStats() {
     })),
   })
 
+  // See TvStats: wait for the watch set too, or a warm TMDB cache renders the
+  // tiles against an empty set and reports every movie as unwatched.
+  const loading = follows.isLoading || watchIds.isLoading || details.some((d) => d.isLoading)
+  if (loading) return <StatsSectionSkeleton icon="🎬" label="Movies" tiles={4} />
   if (movieFollows.length === 0) return null
 
   const resolved = details.map((d) => d.data).filter((d): d is TitleDetail => Boolean(d))
-  const loading = details.some((d) => d.isLoading)
-
-  if (loading) return <StatsSectionSkeleton icon="🎬" label="Movies" tiles={4} />
-
-  const watched = watchedIds.data ?? new Set<number>()
+  const watched = watchedMovieIds(movieFollows, watchIds.data ?? new Set<number>())
   const detailById = new Map(resolved.map((d) => [d.id, d]))
 
-  // Watched-count is DB-derived (watchedIds ∩ tracked movies) so it stays exact
-  // regardless of which TMDB detail fetches succeed; details only refine the
-  // runtime-based time estimate and the genre breakdown.
+  // Both counts are DB-derived (follow status + logged watches) so they stay
+  // exact regardless of which TMDB detail fetches succeed; details only refine
+  // the runtime-based time estimate and the genre breakdown.
   let minutes = 0
   let watchedCount = 0
+  let toWatch = 0
   const genres = new Map<string, number>()
   for (const f of movieFollows) {
     if (watched.has(f.tmdb_id)) {
       watchedCount++
       minutes += detailById.get(f.tmdb_id)?.runtime ?? 115
+    } else if (f.status !== 'dropped') {
+      // A movie you gave up on isn't waiting to be watched.
+      toWatch++
     }
   }
   for (const d of resolved) {
@@ -365,7 +377,7 @@ function MovieStats() {
         <StatTile icon="🎬" value={movieFollows.length} label="movies" />
         <TimeTile value={time.value} unit={time.unit} />
         <StatTile icon="✓" value={watchedCount} label="watched" />
-        <StatTile icon="🍿" value={Math.max(0, movieFollows.length - watchedCount)} label="to watch" />
+        <StatTile icon="🍿" value={toWatch} label="to watch" />
       </div>
       <BarList title="Top genres" items={topN(genres, 5)} />
       <MonthChart title="Upcoming releases" dates={upcoming} />

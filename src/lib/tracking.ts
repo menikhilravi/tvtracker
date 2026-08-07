@@ -197,6 +197,19 @@ export function useWatchedMovieIds() {
   })
 }
 
+// Every movie the user has seen. Logging a watch and marking a movie
+// "completed" are two separate actions (the Log button vs. the status pills),
+// and an import can set one without the other — so a movie counts as watched
+// if *either* is true. Counting only movie_watches rows made large libraries
+// look almost entirely unwatched.
+export function watchedMovieIds(follows: FollowRow[], watchRowIds: Set<number>): Set<number> {
+  const ids = new Set(watchRowIds)
+  for (const f of follows) {
+    if (f.media_type === 'movie' && f.status === 'completed') ids.add(f.tmdb_id)
+  }
+  return ids
+}
+
 // Watched episodes for a show, as a Set of "S{n}E{n}" keys for quick lookup.
 export function useEpisodeWatches(showId: number) {
   const { session } = useAuth()
@@ -542,30 +555,55 @@ export interface Stats {
   estimatedMinutes: number
 }
 
-export function useStats() {
+// Headline stats, derived from the same rows the rest of the app reads (the
+// library's follows + the movie-watch set) so these numbers agree with the
+// Profile library. Counting tables directly drifted from it: movie_watches has
+// no unique key so rewatches inflated "Movies", and `follows.status` alone
+// missed movies that were logged but never marked completed.
+export function useStats(): { data: Stats | undefined; isLoading: boolean } {
   const { session } = useAuth()
-  return useQuery({
-    queryKey: ['stats'],
+  const follows = useFollows()
+  const movieWatches = useWatchedMovieIds()
+
+  const episodes = useQuery({
+    queryKey: ['stats', 'episodes'],
     enabled: Boolean(supabase && session),
-    queryFn: async (): Promise<Stats> => {
-      const count = async (table: string, filter?: (q: any) => any) => {
-        let q = supabase!.from(table).select('*', { count: 'exact', head: true })
-        if (filter) q = filter(q)
-        const { count: c, error } = await q
-        if (error) throw error
-        return c ?? 0
-      }
-      const [episodesWatched, moviesWatched, showsTracked, completed] = await Promise.all([
-        count('episode_watches'),
-        count('movie_watches'),
-        count('follows'),
-        count('follows', (q) => q.eq('status', 'completed')),
-      ])
-      // Rough estimate: ~40 min per episode, ~115 min per movie.
-      const estimatedMinutes = episodesWatched * 40 + moviesWatched * 115
-      return { episodesWatched, moviesWatched, showsTracked, completed, estimatedMinutes }
+    queryFn: async () => {
+      // episode_watches is unique per (user, show, season, episode), so an
+      // exact head-count is already the distinct episode count.
+      const { count, error } = await supabase!
+        .from('episode_watches')
+        .select('*', { count: 'exact', head: true })
+      if (error) throw error
+      return count ?? 0
     },
   })
+
+  const isLoading = follows.isLoading || movieWatches.isLoading || episodes.isLoading
+  if (!follows.data || !movieWatches.data || episodes.data === undefined) {
+    return { data: undefined, isLoading }
+  }
+
+  const watched = watchedMovieIds(follows.data, movieWatches.data)
+  let showsTracked = 0
+  let completed = 0
+  for (const f of follows.data) {
+    if (f.media_type === 'tv') {
+      showsTracked++
+      if (f.status === 'completed') completed++
+    } else if (watched.has(f.tmdb_id)) {
+      completed++
+    }
+  }
+
+  const episodesWatched = episodes.data
+  const moviesWatched = watched.size
+  // Rough estimate: ~40 min per episode, ~115 min per movie.
+  const estimatedMinutes = episodesWatched * 40 + moviesWatched * 115
+  return {
+    data: { episodesWatched, moviesWatched, showsTracked, completed, estimatedMinutes },
+    isLoading: false,
+  }
 }
 
 // --- Library (follows + derived viewing state) ------------------------------
