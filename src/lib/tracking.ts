@@ -842,7 +842,7 @@ export interface FollowRow {
 // that (a large library, thousands of episode watches) must be paged. This
 // walks .range() until a short page signals the end.
 const PAGE_SIZE = 1000
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
 ): Promise<T[]> {
   const all: T[] = []

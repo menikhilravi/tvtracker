@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { pushSupported, currentSubscription, enablePush, disablePush } from '../lib/push'
 import { useDetailCoverage, useSyncTitleDetails } from '../lib/tracking'
+import { buildExport, downloadExport } from '../lib/exportData'
 
 // App settings, split out of Profile so it doesn't get swamped.
 export function Settings() {
@@ -28,8 +29,64 @@ export function Settings() {
             <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Library data</h2>
             <TitleDetailsRow />
           </div>
+          <div className="mt-8">
+            <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">Your data</h2>
+            <ExportRow />
+          </div>
         </>
       )}
+    </div>
+  )
+}
+
+// Download everything: library, watches, ratings, character votes, and the
+// titles they point at. This app exists because a service shut down and took
+// people's history with it, so getting the data back out can't be something you
+// need database access to do.
+function ExportRow() {
+  const { session } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const run = async () => {
+    if (!session?.user) return
+    setBusy(true)
+    setErr(null)
+    setResult(null)
+    try {
+      const bundle = await buildExport({ id: session.user.id, email: session.user.email })
+      downloadExport(bundle)
+      const { follows, episodeWatches, movieWatches } = bundle.counts
+      setResult(
+        `Exported ${follows} tracked titles, ${episodeWatches} episode watches and ${movieWatches} movie watches.`,
+      )
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium">Export a backup</p>
+          <p className="text-xs text-muted">
+            One JSON file with everything you’ve tracked, watched and rated.
+          </p>
+        </div>
+        <button
+          onClick={run}
+          disabled={busy}
+          className="shrink-0 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white transition active:scale-95 disabled:opacity-50"
+        >
+          {busy ? 'Building…' : 'Export'}
+        </button>
+      </div>
+      {result && <p className="mt-2 text-xs text-watched">{result}</p>}
+      {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
     </div>
   )
 }
