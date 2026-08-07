@@ -7,8 +7,10 @@ import { Poster } from '../components/Poster'
 import { DiscoverRails } from '../components/DiscoverRails'
 import { ProviderBadge } from '../components/ProviderBadge'
 import { StatusBadge } from '../components/StatusBadge'
+import { HideTrackedToggle } from '../components/HideTrackedToggle'
 import { trackedKey, useFollowStatusMap } from '../lib/tracking'
 import { useWatchRegion } from '../lib/region'
+import { useHideTracked } from '../lib/uiState'
 
 type TypeFilter = 'all' | MediaType
 
@@ -22,6 +24,7 @@ export function Search() {
 
   // Each result's library status (Watched / Watching / Watchlist / Stopped).
   const statusByKey = useFollowStatusMap()
+  const [hideTracked, setHideTracked] = useHideTracked()
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [genre, setGenre] = useState('')
@@ -76,7 +79,7 @@ export function Search() {
   const activeGenre = availableGenres.includes(genre) ? genre : ''
   const activeDecade = availableDecades.includes(decade) ? decade : ''
 
-  const filtered = useMemo(
+  const matching = useMemo(
     () =>
       results.filter((r) => {
         if (typeFilter !== 'all' && r.media_type !== typeFilter) return false
@@ -86,6 +89,18 @@ export function Search() {
       }),
     [results, typeFilter, activeGenre, activeDecade, genresOf],
   )
+
+  // Search doubles as navigation — it's how you reach a show you already track
+  // to mark an episode. So "New only" never silently swallows a match: what it
+  // hides is counted and one tap away.
+  const filtered = useMemo(
+    () =>
+      hideTracked
+        ? matching.filter((r) => !statusByKey.has(trackedKey(r.media_type, r.id)))
+        : matching,
+    [matching, hideTracked, statusByKey],
+  )
+  const hiddenCount = matching.length - filtered.length
 
   return (
     <div className="min-h-dvh">
@@ -181,6 +196,8 @@ export function Search() {
               </select>
             )}
 
+            <HideTrackedToggle />
+
             {(typeFilter !== 'all' || activeGenre || activeDecade) && (
               <button
                 onClick={() => {
@@ -232,11 +249,21 @@ export function Search() {
           </div>
         )}
 
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => setHideTracked(false)}
+            className="mt-3 w-full rounded-2xl border border-line bg-surface/60 p-3 text-xs text-muted active:scale-[0.99]"
+          >
+            {hiddenCount} {hiddenCount === 1 ? 'result is' : 'results are'} already in your library —{' '}
+            <span className="font-semibold text-brand">show {hiddenCount === 1 ? 'it' : 'them'}</span>
+          </button>
+        )}
+
         {query.length > 1 && !isFetching && results.length === 0 && (
           <p className="mt-8 text-center text-sm text-muted">No results for “{query}”.</p>
         )}
 
-        {query.length > 1 && !isFetching && results.length > 0 && filtered.length === 0 && (
+        {query.length > 1 && !isFetching && results.length > 0 && filtered.length === 0 && hiddenCount === 0 && (
           <p className="mt-8 text-center text-sm text-muted">
             No results match those filters.
           </p>

@@ -10,14 +10,16 @@ import {
 } from '../lib/tmdb'
 import type { MediaType } from '../lib/types'
 import { useFollowStatusMap, type FollowStatus } from '../lib/tracking'
-import { usePersistedState } from '../lib/uiState'
+import { usePersistedState, useHideTracked } from '../lib/uiState'
 import { PosterRail } from './PosterRail'
+import { HideTrackedToggle } from './HideTrackedToggle'
 
 // The full discovery surface shown on the Search empty state: fixed shelves
 // (trending / popular / top-rated) plus a genre browser. Titles already in the
 // user's library are badged with their status via `statusByKey`.
 export function DiscoverRails() {
   const statusByKey = useFollowStatusMap()
+  const [hideTracked] = useHideTracked()
 
   const trending = useQuery({ queryKey: ['trending', 'week'], queryFn: () => getTrending('week') })
   const popularTv = useQuery({ queryKey: ['popular', 'tv'], queryFn: () => getPopular('tv') })
@@ -25,15 +27,20 @@ export function DiscoverRails() {
   const topTv = useQuery({ queryKey: ['top_rated', 'tv'], queryFn: () => getTopRated('tv') })
   const topMovie = useQuery({ queryKey: ['top_rated', 'movie'], queryFn: () => getTopRated('movie') })
 
+  const rail = { statusByKey, hideTracked }
   return (
     <div>
-      <PosterRail title="Trending this week" items={trending.data ?? []} statusByKey={statusByKey} />
-      <PosterRail title="Popular shows" items={popularTv.data ?? []} statusByKey={statusByKey} />
-      <PosterRail title="Popular movies" items={popularMovie.data ?? []} statusByKey={statusByKey} />
-      <PosterRail title="Top rated shows" items={topTv.data ?? []} statusByKey={statusByKey} />
-      <PosterRail title="Top rated movies" items={topMovie.data ?? []} statusByKey={statusByKey} />
-      <GenreBrowse statusByKey={statusByKey} />
-      <LanguageBrowse statusByKey={statusByKey} />
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold tracking-wide text-muted">Discover</h2>
+        <HideTrackedToggle />
+      </div>
+      <PosterRail title="Trending this week" items={trending.data ?? []} {...rail} />
+      <PosterRail title="Popular shows" items={popularTv.data ?? []} {...rail} />
+      <PosterRail title="Popular movies" items={popularMovie.data ?? []} {...rail} />
+      <PosterRail title="Top rated shows" items={topTv.data ?? []} {...rail} />
+      <PosterRail title="Top rated movies" items={topMovie.data ?? []} {...rail} />
+      <GenreBrowse {...rail} />
+      <LanguageBrowse {...rail} />
     </div>
   )
 }
@@ -61,7 +68,13 @@ const LANGUAGES: { code: string; name: string }[] = [
   { code: 'fr', name: 'French' },
 ]
 
-function LanguageBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus> }) {
+function LanguageBrowse({
+  statusByKey,
+  hideTracked,
+}: {
+  statusByKey: Map<string, FollowStatus>
+  hideTracked: boolean
+}) {
   const [mediaType, setMediaType] = usePersistedState<MediaType>('discover:langMedia', 'movie')
   // Persisted, defaults to Telugu so regional films show without any tapping.
   const [lang, setLang] = usePersistedState<string | null>('discover:lang', 'te')
@@ -113,13 +126,20 @@ function LanguageBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus
           title={`Popular in ${selected.name}`}
           items={results ?? []}
           statusByKey={statusByKey}
+          hideTracked={hideTracked}
         />
       )}
     </section>
   )
 }
 
-function GenreBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus> }) {
+function GenreBrowse({
+  statusByKey,
+  hideTracked,
+}: {
+  statusByKey: Map<string, FollowStatus>
+  hideTracked: boolean
+}) {
   const [mediaType, setMediaType] = useState<MediaType>('tv')
   const [genreId, setGenreId] = useState<number | null>(null)
 
@@ -176,7 +196,12 @@ function GenreBrowse({ statusByKey }: { statusByKey: Map<string, FollowStatus> }
       </div>
 
       {selected && (
-        <PosterRail title={`Best ${selected.name}`} items={results ?? []} statusByKey={statusByKey} />
+        <PosterRail
+          title={`Best ${selected.name}`}
+          items={results ?? []}
+          statusByKey={statusByKey}
+          hideTracked={hideTracked}
+        />
       )}
     </section>
   )

@@ -16,6 +16,14 @@ export function usePersistedState<T>(key: string, initial: T): [T, (v: T) => voi
   return [value, set]
 }
 
+// "Only show me things I haven't added yet" — shared by the discovery rails and
+// the search results so toggling it in one place applies to both. Defaults on:
+// discovery is for finding new titles, and a large library otherwise fills the
+// rails with things you've already seen.
+export function useHideTracked() {
+  return usePersistedState<boolean>('discover:hideTracked', true)
+}
+
 // Remember and restore an element's scrollTop across unmounts (e.g. a modal's
 // scroll region, which the window-level ScrollRestoration can't see).
 export function useScrollMemory<T extends HTMLElement>(key: string) {
