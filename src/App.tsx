@@ -9,6 +9,7 @@ import { Settings } from './pages/Settings'
 import { Stats } from './pages/Stats'
 import { Calendar } from './pages/Calendar'
 import { History } from './pages/History'
+import { Tonight } from './pages/Tonight'
 
 const router = createBrowserRouter([
   {
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
       { path: '/title/:mediaType/:id', element: <TitleDetail /> },
       { path: '/person/:id', element: <Person /> },
       { path: '/history', element: <History /> },
+      { path: '/tonight', element: <Tonight /> },
       { path: '/profile', element: <Profile /> },
       { path: '/settings', element: <Settings /> },
       { path: '/stats', element: <Stats /> },

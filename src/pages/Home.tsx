@@ -8,7 +8,13 @@ import { Logo } from '../components/Logo'
 import { PosterRail } from '../components/PosterRail'
 import { ViewToggle, type ViewMode } from '../components/ViewToggle'
 import { getSimilarTitles, getTitle } from '../lib/tmdb'
-import { useFollows, trackedKey, type FollowRow } from '../lib/tracking'
+import {
+  useAllRatings,
+  useFollows,
+  ratingKey,
+  trackedKey,
+  type FollowRow,
+} from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
 
 type MediaTab = 'tv' | 'movie'
@@ -96,7 +102,15 @@ export function Home() {
         ))}
       </div>
 
-      <SurpriseMe items={watchlist} />
+      <div className="mb-6 flex gap-2.5">
+        <SurpriseMe items={watchlist} />
+        <Link
+          to="/tonight"
+          className="flex-1 rounded-2xl border border-line bg-surface/60 py-3 text-center text-sm font-semibold active:scale-[0.98]"
+        >
+          📺 Streaming now
+        </Link>
+      </div>
 
       {tab === 'tv' && <UpNextRail view={view} />}
 
@@ -142,21 +156,43 @@ export function Home() {
   )
 }
 
-// "Because you watched {X}" — recommendations seeded from a title the user has
-// engaged with most recently (prefer completed, then watching) in the active
-// media tab. Already-tracked titles are filtered out so it only surfaces new
-// things to watch.
+// A score you'd call a favourite. Below this, a rating isn't a strong enough
+// signal to build a recommendation on.
+const LOVED_SCORE = 8
+// How many of your top-rated titles to rotate between.
+const SEED_POOL = 5
+// Whole days since the epoch — rotates the seed daily while staying stable
+// within a day, so the rail stays cacheable and doesn't reshuffle on every
+// render the way a random pick would.
+const dayIndex = () => Math.floor(Date.now() / 86_400_000)
+
+// Recommendations seeded from something you've actually rated highly, falling
+// back to what you last engaged with when nothing clears the bar. Taste beats
+// recency here: the most recently touched title is often something you dropped
+// or are indifferent to, which made the old rail recommend from a weak signal.
+// Already-tracked titles are filtered out so it only surfaces new things.
 function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab }) {
+  const { data: ratings } = useAllRatings()
   const seed = useMemo(() => {
-    const candidates = follows
-      .filter((f) => f.media_type === tab && f.poster_path)
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    return (
-      candidates.find((f) => f.status === 'completed') ??
-      candidates.find((f) => f.status === 'watching') ??
+    const candidates = follows.filter((f) => f.media_type === tab && f.poster_path)
+
+    const loved = candidates
+      .map((f) => ({ row: f, score: ratings?.get(ratingKey(f.media_type, f.tmdb_id)) ?? 0 }))
+      .filter((x) => x.score >= LOVED_SCORE)
+      .sort((a, b) => b.score - a.score || b.row.updated_at.localeCompare(a.row.updated_at))
+
+    if (loved.length > 0) {
+      const pool = loved.slice(0, SEED_POOL)
+      return { row: pool[dayIndex() % pool.length].row, loved: true }
+    }
+
+    const byRecent = [...candidates].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    const row =
+      byRecent.find((f) => f.status === 'completed') ??
+      byRecent.find((f) => f.status === 'watching') ??
       null
-    )
-  }, [follows, tab])
+    return row ? { row, loved: false } : null
+  }, [follows, tab, ratings])
 
   const tracked = useMemo(
     () => new Set(follows.map((f) => trackedKey(f.media_type, f.tmdb_id))),
@@ -166,15 +202,15 @@ function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab
   // Fetch the seed's detail (shared cache with the title page) for its original
   // language + genres, so the rail can stay regional when the seed is regional.
   const { data: seedDetail } = useQuery({
-    queryKey: ['title', seed?.media_type, seed?.tmdb_id],
-    queryFn: () => getTitle(seed!.media_type, seed!.tmdb_id),
+    queryKey: ['title', seed?.row.media_type, seed?.row.tmdb_id],
+    queryFn: () => getTitle(seed!.row.media_type, seed!.row.tmdb_id),
     enabled: Boolean(seed),
   })
 
   const { data } = useQuery({
-    queryKey: ['similar', seed?.media_type, seed?.tmdb_id],
+    queryKey: ['similar', seed?.row.media_type, seed?.row.tmdb_id],
     queryFn: () =>
-      getSimilarTitles(seed!.media_type, seed!.tmdb_id, {
+      getSimilarTitles(seed!.row.media_type, seed!.row.tmdb_id, {
         originalLanguage: seedDetail!.originalLanguage,
         genreIds: seedDetail!.genreIds,
       }),
@@ -183,8 +219,11 @@ function RecommendedRail({ follows, tab }: { follows: FollowRow[]; tab: MediaTab
 
   if (!seed) return null
   const items = (data ?? []).filter((r) => !tracked.has(trackedKey(r.media_type, r.id)))
+  const heading = seed.loved
+    ? `Because you loved ${seed.row.name}`
+    : `Because you watched ${seed.row.name}`
 
-  return <PosterRail title={`Because you watched ${seed.name}`} items={items} />
+  return <PosterRail title={heading} items={items} />
 }
 
 // "What should I watch?" — picks a random title from the watchlist to beat
@@ -204,7 +243,7 @@ function SurpriseMe({ items }: { items: FollowRow[] }) {
     <>
       <button
         onClick={roll}
-        className="mb-6 w-full rounded-2xl border border-line bg-surface/60 py-3 text-sm font-semibold active:scale-[0.98]"
+        className="flex-1 rounded-2xl border border-line bg-surface/60 py-3 text-sm font-semibold active:scale-[0.98]"
       >
         🎲 Surprise me
       </button>

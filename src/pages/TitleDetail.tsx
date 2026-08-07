@@ -7,7 +7,7 @@ import { Poster } from '../components/Poster'
 import { PosterRail } from '../components/PosterRail'
 import { RatingStars } from '../components/RatingStars'
 import { useAuth } from '../lib/auth'
-import { useWatchRegion } from '../lib/region'
+import { useWatchRegion, REGION_NAME } from '../lib/region'
 import type { WatchProvider } from '../lib/types'
 import {
   useFollow,
@@ -268,15 +268,6 @@ function Dot({ text }: { text: string }) {
     </span>
   )
 }
-
-const REGION_NAME = (() => {
-  try {
-    const dn = new Intl.DisplayNames(['en'], { type: 'region' })
-    return (code: string) => dn.of(code) ?? code
-  } catch {
-    return (code: string) => code
-  }
-})()
 
 // "Where to watch" — TMDB/JustWatch streaming availability for the selected
 // region. Region defaults to the browser locale and is switchable + persisted,

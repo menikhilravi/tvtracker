@@ -12,3 +12,14 @@ export function detectRegion(): string {
 export function useWatchRegion() {
   return usePersistedState('watch:region', detectRegion())
 }
+
+// Human-readable country name for a region code ('GB' -> 'United Kingdom'),
+// falling back to the raw code where Intl.DisplayNames isn't available.
+export const REGION_NAME = (() => {
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' })
+    return (code: string) => dn.of(code) ?? code
+  } catch {
+    return (code: string) => code
+  }
+})()
