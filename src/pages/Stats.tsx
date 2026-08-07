@@ -236,8 +236,8 @@ function ActivitySection() {
           </div>
         </div>
         <p className="mt-3 text-[11px] text-faint">
-          Last {HEATMAP_WEEKS} weeks. Reflects watches logged in the app — imported history
-          isn’t dated, so it appears on your import day.
+          Last {HEATMAP_WEEKS} weeks. Imported history keeps the dates TV Time recorded; watches
+          it couldn’t date fall on your import day. Any of them can be corrected in History.
         </p>
       </div>
     </div>

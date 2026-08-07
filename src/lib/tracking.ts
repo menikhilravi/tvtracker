@@ -207,9 +207,10 @@ export function useMarkMovieWatched(title: TitleDetail) {
 }
 
 // Watch counts per calendar day (UTC), merging episode + movie watches. Feeds
-// the activity heatmap and streaks. NB: imported history shares the import
-// timestamp, so pre-import dates aren't reconstructed — this is accurate for
-// watches logged in-app going forward.
+// the activity heatmap and streaks. Imported rows carry the real per-episode
+// dates where TV Time's export had them (see scripts/import-tvtime.mjs), and
+// fall back to the show's last activity date, then the import date. Anything
+// wrong can be corrected from the History screen.
 export function useWatchActivity() {
   const { session } = useAuth()
   return useQuery({
@@ -1108,6 +1109,18 @@ export interface HistoryItem {
   tmdbId: number
   mediaType: 'movie' | 'tv'
   subtitle: string // "Movie" or "S2 · E5"
+  /** Row id in its source table — what edit and delete act on. */
+  id: number
+  /** Which table the row came from, since ids aren't unique across them. */
+  source: WatchSource
+  /** Episodes only: viewings recorded on this row (see migration 0007). */
+  plays: number
+}
+
+export type WatchSource = 'episode' | 'movie'
+const WATCH_TABLE: Record<WatchSource, string> = {
+  episode: 'episode_watches',
+  movie: 'movie_watches',
 }
 
 export function useHistory() {
@@ -1117,14 +1130,25 @@ export function useHistory() {
     enabled: Boolean(supabase && session),
     queryFn: async (): Promise<HistoryItem[]> => {
       const [eps, movies] = await Promise.all([
+        // play_count arrives with 0007; fall back so history keeps working
+        // without it (see useEpisodeWatches).
         supabase!
           .from('episode_watches')
-          .select('tmdb_show_id, season_number, episode_number, watched_at')
+          .select('id, tmdb_show_id, season_number, episode_number, watched_at, play_count')
           .order('watched_at', { ascending: false })
-          .limit(60),
+          .limit(60)
+          .then((r) =>
+            r.error
+              ? supabase!
+                  .from('episode_watches')
+                  .select('id, tmdb_show_id, season_number, episode_number, watched_at')
+                  .order('watched_at', { ascending: false })
+                  .limit(60)
+              : r,
+          ),
         supabase!
           .from('movie_watches')
-          .select('tmdb_movie_id, watched_at')
+          .select('id, tmdb_movie_id, watched_at')
           .order('watched_at', { ascending: false })
           .limit(60),
       ])
@@ -1148,7 +1172,10 @@ export function useHistory() {
         ...eps.data.map((e) => {
           const t = titleMap.get(`tv:${e.tmdb_show_id}`)
           return {
-            key: `ep-${e.tmdb_show_id}-${e.season_number}-${e.episode_number}-${e.watched_at}`,
+            key: `ep-${e.id}`,
+            id: e.id,
+            source: 'episode' as const,
+            plays: ('play_count' in e ? (e.play_count as number | null) : null) ?? 1,
             watchedAt: e.watched_at,
             name: t?.name ?? null,
             posterPath: t?.poster_path ?? null,
@@ -1160,7 +1187,10 @@ export function useHistory() {
         ...movies.data.map((m) => {
           const t = titleMap.get(`movie:${m.tmdb_movie_id}`)
           return {
-            key: `mv-${m.tmdb_movie_id}-${m.watched_at}`,
+            key: `mv-${m.id}`,
+            id: m.id,
+            source: 'movie' as const,
+            plays: 1,
             watchedAt: m.watched_at,
             name: t?.name ?? null,
             posterPath: t?.poster_path ?? null,
@@ -1173,5 +1203,75 @@ export function useHistory() {
       items.sort((a, b) => b.watchedAt.localeCompare(a.watchedAt))
       return items
     },
+  })
+}
+
+// --- Editing watch history --------------------------------------------------
+
+// Every query whose numbers depend on when (or whether) something was watched.
+function invalidateWatchQueries(qc: ReturnType<typeof useQueryClient>) {
+  for (const key of [
+    ['history'],
+    ['watch-activity'],
+    ['episode-watches'],
+    ['movie-watches'],
+    ['stats'],
+    ['up-next'],
+  ]) {
+    qc.invalidateQueries({ queryKey: key })
+  }
+}
+
+// Move a watch to a different day. The picker gives a date with no time, and
+// the heatmap buckets by UTC day — so anchor at midday UTC, where no timezone
+// offset can push the entry onto a neighbouring day.
+export function watchedAtForDay(day: string): string {
+  return `${day}T12:00:00.000Z`
+}
+
+export function useUpdateWatchDate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { source: WatchSource; id: number; day: string }) => {
+      if (!supabase) throw new Error('Not configured')
+      const { error } = await supabase
+        .from(WATCH_TABLE[args.source])
+        .update({ watched_at: watchedAtForDay(args.day) })
+        .eq('id', args.id)
+      if (error) throw error
+    },
+    onSuccess: () => invalidateWatchQueries(qc),
+  })
+}
+
+// Remove a watch record. For an episode this drops the row outright — including
+// any rewatches counted on it — so the caller warns when plays > 1.
+export function useDeleteWatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { source: WatchSource; id: number }) => {
+      if (!supabase) throw new Error('Not configured')
+      const { error } = await supabase.from(WATCH_TABLE[args.source]).delete().eq('id', args.id)
+      if (error) throw error
+    },
+    onSuccess: () => invalidateWatchQueries(qc),
+  })
+}
+
+// Take one viewing back off an episode without unwatching it. The mirror of
+// useRewatchEpisode, for when the rewatch button gets an accidental tap.
+export function useUndoEpisodeRewatch(show: TitleDetail) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { season: number; episode: number }) => {
+      if (!supabase) throw new Error('Not configured')
+      const { error } = await supabase.rpc('undo_episode_rewatch', {
+        p_show: show.id,
+        p_season: args.season,
+        p_episode: args.episode,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => invalidateWatchQueries(qc),
   })
 }

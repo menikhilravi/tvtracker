@@ -22,6 +22,7 @@ import {
   useRateEpisode,
   useToggleEpisode,
   useRewatchEpisode,
+  useUndoEpisodeRewatch,
   useToggleSeason,
   useRating,
   useCharacterVotes,
@@ -903,6 +904,7 @@ function EpisodeModal({
   const rate = useRateEpisode(show)
   const toggle = useToggleEpisode(show)
   const rewatch = useRewatchEpisode(show)
+  const undoRewatch = useUndoEpisodeRewatch(show)
   const still = IMG(episode.stillPath, 'w500')
 
   // Close on Escape; lock background scroll while open.
@@ -974,19 +976,39 @@ function EpisodeModal({
             {/* Rewatching is a separate action from unmarking: the toggle above
                 says "I haven't seen this", this says "I've seen it again". */}
             {watched && (
-              <button
-                onClick={() =>
-                  rewatch.mutate({ season: episode.seasonNumber, episode: episode.episodeNumber })
-                }
-                disabled={rewatch.isPending}
-                className="mt-2 w-full rounded-xl border border-line bg-surface py-2.5 text-sm font-semibold text-muted transition active:scale-[0.98] disabled:opacity-50"
-              >
-                {rewatch.isPending
-                  ? '…'
-                  : plays > 1
-                    ? `↻ Watched ${plays}× — log another`
-                    : '↻ Log a rewatch'}
-              </button>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() =>
+                    rewatch.mutate({ season: episode.seasonNumber, episode: episode.episodeNumber })
+                  }
+                  disabled={rewatch.isPending || undoRewatch.isPending}
+                  className="flex-1 rounded-xl border border-line bg-surface py-2.5 text-sm font-semibold text-muted transition active:scale-[0.98] disabled:opacity-50"
+                >
+                  {rewatch.isPending
+                    ? '…'
+                    : plays > 1
+                      ? `↻ Watched ${plays}× — log another`
+                      : '↻ Log a rewatch'}
+                </button>
+                {/* Undo is the precise fix for a mis-tap: it takes one viewing
+                    off without unwatching the episode. */}
+                {plays > 1 && (
+                  <button
+                    onClick={() =>
+                      undoRewatch.mutate({
+                        season: episode.seasonNumber,
+                        episode: episode.episodeNumber,
+                      })
+                    }
+                    disabled={rewatch.isPending || undoRewatch.isPending}
+                    aria-label="Undo last rewatch"
+                    title="Undo last rewatch"
+                    className="shrink-0 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-semibold text-faint transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {undoRewatch.isPending ? '…' : '−1'}
+                  </button>
+                )}
+              </div>
             )}
 
             {hasAired(episode.airDate) ? (
