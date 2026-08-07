@@ -9,20 +9,49 @@ import { useAuth } from './auth'
 import { getTitle } from './tmdb'
 import type { MediaType, TitleDetail } from './types'
 
+// What we persist to the shared `titles` cache. The detail fields are optional
+// because not every call site has them: UpNext, for one, builds a list-shaped
+// stub out of a follow row while the real detail is still loading.
+type CacheableTitle = Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath' | 'year'> &
+  Partial<
+    Pick<
+      TitleDetail,
+      'runtime' | 'episodeRunTime' | 'numberOfEpisodes' | 'genres' | 'networks' | 'releaseDate'
+    >
+  >
+
+// Whether this object came from a real `getTitle` response rather than a stub.
+// `genres` is always an array on a parsed detail (empty at worst) and always
+// absent on a stub, so it's the reliable discriminator.
+const hasDetail = (t: CacheableTitle) => Array.isArray(t.genres)
+
 // Keep a lightweight copy of the title so history/watchlist can render without
-// re-fetching TMDB for each row.
-async function cacheTitle(t: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath' | 'year'>) {
+// re-fetching TMDB for each row, plus the stable slice of its TMDB detail
+// (runtime, genres) that the stats breakdowns read.
+async function cacheTitle(t: CacheableTitle) {
   if (!supabase) return
-  await supabase.from('titles').upsert(
-    {
-      tmdb_id: t.id,
-      media_type: t.media_type,
-      name: t.title,
-      poster_path: t.posterPath,
-      release_year: t.year ? Number(t.year) : null,
-    },
-    { onConflict: 'tmdb_id,media_type' },
-  )
+  const row: Record<string, unknown> = {
+    tmdb_id: t.id,
+    media_type: t.media_type,
+    name: t.title,
+    poster_path: t.posterPath,
+  }
+  // A stub has no year, and sending null for it would wipe a year we'd already
+  // stored. Only a real detail is allowed to write null (a genuinely undated title).
+  if (t.year || hasDetail(t)) row.release_year = t.year ? Number(t.year) : null
+  // Only send the detail columns when we actually have them. PostgREST's upsert
+  // updates just the keys present in the payload, so omitting them leaves a
+  // previously-synced row intact instead of a stub blanking it back out.
+  if (hasDetail(t)) {
+    row.runtime = t.runtime ?? null
+    row.episode_run_time = t.episodeRunTime ?? null
+    row.number_of_episodes = t.numberOfEpisodes ?? null
+    row.genres = t.genres ?? []
+    row.networks = t.networks ?? []
+    row.release_date = t.releaseDate || null // TMDB sends '' for an unknown date
+    row.details_synced_at = new Date().toISOString()
+  }
+  await supabase.from('titles').upsert(row, { onConflict: 'tmdb_id,media_type' })
 }
 
 // Logging a watch should start tracking a title as "watching". This promotes
@@ -56,9 +85,7 @@ async function promoteToWatching(
 
 export type FollowStatus = 'watchlist' | 'watching' | 'completed' | 'dropped'
 
-export function useFollow(
-  title: Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath'>,
-) {
+export function useFollow(title: CacheableTitle) {
   const tmdbId = title.id
   const mediaType = title.media_type
   const { session } = useAuth()
@@ -87,6 +114,10 @@ export function useFollow(
         await supabase.from('follows').delete().eq('tmdb_id', tmdbId).eq('media_type', mediaType)
         return null
       }
+      // Tracking a title is usually the first time we see it, and the stats
+      // breakdowns cover the whole library — not just what you've watched — so
+      // cache its detail here rather than waiting for a watch to be logged.
+      await cacheTitle(title)
       await supabase
         .from('follows')
         .upsert(
@@ -106,6 +137,7 @@ export function useFollow(
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['follow', tmdbId, mediaType] })
       qc.invalidateQueries({ queryKey: ['follows'] })
+      qc.invalidateQueries({ queryKey: ['titles', 'cached'] })
     },
   })
 
@@ -545,6 +577,122 @@ export function useToggleCharacterVote(
   })
 }
 
+// --- Cached title detail ----------------------------------------------------
+
+// The stable slice of a TMDB detail we keep in the shared `titles` table.
+// Live-changing fields (next episode to air, watch providers) are deliberately
+// absent — those are still fetched on demand.
+export interface CachedTitle {
+  tmdb_id: number
+  media_type: MediaType
+  runtime: number | null
+  episode_run_time: number | null
+  number_of_episodes: number | null
+  genres: string[] | null
+  networks: string[] | null
+  release_date: string | null
+  details_synced_at: string | null
+}
+
+export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`
+
+// Fallbacks for a title whose detail hasn't been synced yet — the flat averages
+// the headline stat used to apply to everything.
+export const FALLBACK_EPISODE_MINUTES = 40
+export const FALLBACK_MOVIE_MINUTES = 115
+
+// Every title we've cached detail for, keyed by `titleKey`. One paginated read
+// covers the whole library; the alternative (a getTitle per tracked title) burst
+// hundreds of proxy requests every time Stats mounted.
+export function useCachedTitles() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['titles', 'cached'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const rows = await fetchAllRows<CachedTitle>((from, to) =>
+        supabase!
+          .from('titles')
+          .select(
+            'tmdb_id, media_type, runtime, episode_run_time, number_of_episodes, genres, networks, release_date, details_synced_at',
+          )
+          .not('details_synced_at', 'is', null)
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
+      return new Map(rows.map((r) => [titleKey(r.media_type, r.tmdb_id), r]))
+    },
+  })
+}
+
+export interface TitleRef {
+  tmdbId: number
+  mediaType: MediaType
+}
+
+export interface DetailCoverage {
+  total: number
+  synced: number
+  missing: TitleRef[]
+}
+
+// How much of the library has cached detail, and what's left. Drives the sync
+// row in Settings and the "estimate" caveat on the stats hero.
+export function useDetailCoverage(): { data: DetailCoverage | undefined; isLoading: boolean } {
+  const follows = useFollows()
+  const cached = useCachedTitles()
+
+  const isLoading = follows.isLoading || cached.isLoading
+  if (!follows.data || !cached.data) return { data: undefined, isLoading }
+
+  const missing: TitleRef[] = []
+  for (const f of follows.data) {
+    if (!cached.data.has(titleKey(f.media_type, f.tmdb_id))) {
+      missing.push({ tmdbId: f.tmdb_id, mediaType: f.media_type })
+    }
+  }
+  return {
+    data: { total: follows.data.length, synced: follows.data.length - missing.length, missing },
+    isLoading: false,
+  }
+}
+
+// The proxy rate-limits a burst, and an imported library can be thousands of
+// titles, so the sync runs a few requests at a time rather than all at once.
+const SYNC_CONCURRENCY = 4
+
+// Fetch TMDB detail for titles we haven't cached yet and write it to `titles`.
+// One title's failure (a dead TMDB id, a transient proxy error) is counted and
+// skipped rather than aborting the run — it stays unsynced and is simply picked
+// up by the next sync.
+export function useSyncTitleDetails() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { missing: TitleRef[]; onProgress?: (done: number) => void }) => {
+      const queue = [...args.missing]
+      let done = 0
+      let failed = 0
+      const worker = async () => {
+        for (;;) {
+          const next = queue.shift()
+          if (!next) return
+          try {
+            await cacheTitle(await getTitle(next.mediaType, next.tmdbId))
+          } catch {
+            failed++
+          }
+          args.onProgress?.(++done)
+        }
+      }
+      await Promise.all(Array.from({ length: SYNC_CONCURRENCY }, worker))
+      return { done, failed }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['titles', 'cached'] })
+    },
+  })
+}
+
 // --- Stats ------------------------------------------------------------------
 
 export interface Stats {
@@ -552,7 +700,10 @@ export interface Stats {
   moviesWatched: number
   showsTracked: number
   completed: number
+  /** Real runtimes where cached; flat averages for anything not yet synced. */
   estimatedMinutes: number
+  /** How many watched titles fell back to an average — 0 means the total is exact. */
+  unsyncedWatched: number
 }
 
 // Headline stats, derived from the same rows the rest of the app reads (the
@@ -561,26 +712,16 @@ export interface Stats {
 // no unique key so rewatches inflated "Movies", and `follows.status` alone
 // missed movies that were logged but never marked completed.
 export function useStats(): { data: Stats | undefined; isLoading: boolean } {
-  const { session } = useAuth()
   const follows = useFollows()
   const movieWatches = useWatchedMovieIds()
+  // Watch time is summed per show, not from a flat episode count, so a 22-min
+  // sitcom and a 70-min drama no longer weigh the same.
+  const epWatches = useAllEpisodeWatches()
+  const cached = useCachedTitles()
 
-  const episodes = useQuery({
-    queryKey: ['stats', 'episodes'],
-    enabled: Boolean(supabase && session),
-    queryFn: async () => {
-      // episode_watches is unique per (user, show, season, episode), so an
-      // exact head-count is already the distinct episode count.
-      const { count, error } = await supabase!
-        .from('episode_watches')
-        .select('*', { count: 'exact', head: true })
-      if (error) throw error
-      return count ?? 0
-    },
-  })
-
-  const isLoading = follows.isLoading || movieWatches.isLoading || episodes.isLoading
-  if (!follows.data || !movieWatches.data || episodes.data === undefined) {
+  const isLoading =
+    follows.isLoading || movieWatches.isLoading || epWatches.isLoading || cached.isLoading
+  if (!follows.data || !movieWatches.data || !epWatches.data || !cached.data) {
     return { data: undefined, isLoading }
   }
 
@@ -596,12 +737,33 @@ export function useStats(): { data: Stats | undefined; isLoading: boolean } {
     }
   }
 
-  const episodesWatched = episodes.data
-  const moviesWatched = watched.size
-  // Rough estimate: ~40 min per episode, ~115 min per movie.
-  const estimatedMinutes = episodesWatched * 40 + moviesWatched * 115
+  const meta = cached.data
+  let estimatedMinutes = 0
+  let episodesWatched = 0
+  let unsyncedWatched = 0
+  for (const [showId, eps] of epWatches.data) {
+    // episode_watches is unique per (user, show, season, episode), so the set
+    // size is already the distinct episode count.
+    episodesWatched += eps.size
+    const runtime = meta.get(titleKey('tv', showId))?.episode_run_time
+    if (!runtime) unsyncedWatched++
+    estimatedMinutes += eps.size * (runtime || FALLBACK_EPISODE_MINUTES)
+  }
+  for (const id of watched) {
+    const runtime = meta.get(titleKey('movie', id))?.runtime
+    if (!runtime) unsyncedWatched++
+    estimatedMinutes += runtime || FALLBACK_MOVIE_MINUTES
+  }
+
   return {
-    data: { episodesWatched, moviesWatched, showsTracked, completed, estimatedMinutes },
+    data: {
+      episodesWatched,
+      moviesWatched: watched.size,
+      showsTracked,
+      completed,
+      estimatedMinutes,
+      unsyncedWatched,
+    },
     isLoading: false,
   }
 }

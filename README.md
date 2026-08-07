@@ -56,7 +56,12 @@ npm install
    so on): copy each file's entire contents into the SQL Editor and click
    **Run**. `0001` creates the core tables and the security rules that keep
    your data private; the later files add features (per-episode ratings,
-   favorite-character votes, …). You should see "Success" after each.
+   favorite-character votes, cached title details, …). You should see "Success"
+   after each.
+
+> Already had the app running before `0006_title_details.sql`? After running it,
+> open **Settings → Library data → Sync** once to fill in runtimes and genres
+> for titles you were already tracking.
 
 ### Step 5 — Deploy the TMDB proxy (hides your token)
 
