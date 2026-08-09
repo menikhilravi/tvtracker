@@ -13,7 +13,7 @@ import type { MediaType, TitleDetail } from './types'
 // What we persist to the shared `titles` cache. The detail fields are optional
 // because not every call site has them: UpNext, for one, builds a list-shaped
 // stub out of a follow row while the real detail is still loading.
-type CacheableTitle = Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath' | 'year'> &
+export type CacheableTitle = Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterPath' | 'year'> &
   Partial<
     Pick<
       TitleDetail,
@@ -24,7 +24,7 @@ type CacheableTitle = Pick<TitleDetail, 'id' | 'media_type' | 'title' | 'posterP
 // Whether this object came from a real `getTitle` response rather than a stub.
 // `genres` is always an array on a parsed detail (empty at worst) and always
 // absent on a stub, so it's the reliable discriminator.
-const hasDetail = (t: CacheableTitle) => Array.isArray(t.genres)
+export const hasDetail = (t: CacheableTitle) => Array.isArray(t.genres)
 
 // Keep a lightweight copy of the title so history/watchlist can render without
 // re-fetching TMDB for each row, plus the stable slice of its TMDB detail
@@ -1223,8 +1223,15 @@ function invalidateWatchQueries(qc: ReturnType<typeof useQueryClient>) {
 }
 
 // Move a watch to a different day. The picker gives a date with no time, and
-// the heatmap buckets by UTC day — so anchor at midday UTC, where no timezone
-// offset can push the entry onto a neighbouring day.
+// the heatmap buckets by UTC day, so we anchor at midday UTC — the point
+// furthest from a day boundary, giving ~12h of slack before any local rendering
+// disagrees about which day it was.
+//
+// That slack covers every UTC offset except the extremes: at UTC+12 and beyond,
+// midday UTC is already the next calendar day locally, so History (which groups
+// in local time) shows it a day later than the heatmap (which buckets in UTC).
+// Both are internally consistent; making them agree everywhere would mean
+// storing the intended calendar day rather than an instant.
 export function watchedAtForDay(day: string): string {
   return `${day}T12:00:00.000Z`
 }
