@@ -19,7 +19,7 @@ export type Period = { kind: 'year'; year: number } | { kind: 'month'; year: num
 
 /** A single dated viewing. `tmdbId` is the show id for episodes, movie id for movies. */
 export interface DatedWatch {
-  kind: 'episode' | 'movie'
+  kind: WatchKind
   tmdbId: number
   /** ISO timestamp; only the UTC day is used, matching the activity heatmap. */
   watchedAt: string
@@ -38,11 +38,26 @@ export interface ReviewTitleMeta {
 
 /** Key for the meta map. Distinct from titleKey so a movie and show sharing a
  *  numeric id can't collide. */
-export const reviewKey = (kind: 'episode' | 'movie', tmdbId: number) => `${kind}:${tmdbId}`
+export const reviewKey = (kind: WatchKind, tmdbId: number) => `${kind}:${tmdbId}`
+
+export type WatchKind = 'episode' | 'movie'
+
+/** Watch kinds map onto media types: an episode watch belongs to a tv title.
+ *  Ratings and character votes are stored by media type, so they come through
+ *  here before looking anything up in the meta map. */
+export const kindForMedia = (mediaType: 'movie' | 'tv'): WatchKind =>
+  mediaType === 'tv' ? 'episode' : 'movie'
+
+/** Minutes one viewing is worth, falling back to a flat average when the title
+ *  has no cached runtime. Shared so every figure on the review — the total, the
+ *  per-title ranking, the monthly chart — is derived the same way. */
+export function minutesFor(kind: WatchKind, m: ReviewTitleMeta | undefined): number {
+  return m?.minutes || (kind === 'episode' ? FALLBACK_EPISODE_MINUTES : FALLBACK_MOVIE_MINUTES)
+}
 
 export interface ReviewTitle {
   tmdbId: number
-  kind: 'episode' | 'movie'
+  kind: WatchKind
   name: string | null
   posterPath: string | null
   count: number
@@ -158,7 +173,7 @@ export function aggregateReview(
     const key = reviewKey(w.kind, w.tmdbId)
     const m = meta.get(key)
     if (!m?.minutes) unsynced++
-    const mins = m?.minutes || (isEpisode ? FALLBACK_EPISODE_MINUTES : FALLBACK_MOVIE_MINUTES)
+    const mins = minutesFor(w.kind, m)
 
     minutes += mins
     if (isEpisode) episodes++
@@ -208,3 +223,144 @@ export function aggregateReview(
     unsynced,
   }
 }
+
+// --- Favorite characters ----------------------------------------------------
+
+export interface DatedVote {
+  personId: number
+  characterName: string | null
+  actorName: string | null
+  profilePath: string | null
+  createdAt: string
+}
+
+export interface ReviewCharacter {
+  personId: number
+  characterName: string | null
+  actorName: string | null
+  profilePath: string | null
+  /** Votes cast for this person in the period, across every scope. */
+  votes: number
+}
+
+const TOP_CHARACTERS = 6
+
+/** Characters you voted for inside the period, most-voted first.
+ *
+ *  A character can be picked at title, season and episode level, so the same
+ *  person shows up several times; they're collapsed into one entry with a count
+ *  rather than filling the list with duplicates. Display fields come from the
+ *  earliest vote in the period, since later rows may have been written from a
+ *  screen with less complete data. */
+export function charactersInPeriod(votes: DatedVote[], period: Period): ReviewCharacter[] {
+  const { start, end } = periodRange(period)
+  const byPerson = new Map<number, ReviewCharacter & { first: string }>()
+
+  for (const v of votes) {
+    const day = v.createdAt.slice(0, 10)
+    if (day < start || day > end) continue
+    const existing = byPerson.get(v.personId)
+    if (!existing) {
+      byPerson.set(v.personId, {
+        personId: v.personId,
+        characterName: v.characterName,
+        actorName: v.actorName,
+        profilePath: v.profilePath,
+        votes: 1,
+        first: v.createdAt,
+      })
+      continue
+    }
+    existing.votes++
+    if (v.createdAt < existing.first) {
+      existing.first = v.createdAt
+      existing.characterName = v.characterName
+      existing.actorName = v.actorName
+      existing.profilePath = v.profilePath
+    }
+  }
+
+  return [...byPerson.values()]
+    .sort((a, b) => b.votes - a.votes || (a.actorName ?? '').localeCompare(b.actorName ?? ''))
+    .slice(0, TOP_CHARACTERS)
+    .map(({ first: _first, ...rest }) => rest)
+}
+
+// --- Ratings ----------------------------------------------------------------
+
+export interface DatedRating {
+  tmdbId: number
+  mediaType: 'movie' | 'tv'
+  score: number
+  createdAt: string
+}
+
+export interface ReviewRating {
+  tmdbId: number
+  kind: WatchKind
+  name: string | null
+  posterPath: string | null
+  score: number
+}
+
+const TOP_RATED = 6
+
+/** What you scored highest inside the period. Ties break by title so the order
+ *  doesn't depend on which row was read first. */
+export function topRatedInPeriod(
+  ratings: DatedRating[],
+  meta: Map<string, ReviewTitleMeta>,
+  period: Period,
+): ReviewRating[] {
+  const { start, end } = periodRange(period)
+  const out: ReviewRating[] = []
+
+  for (const r of ratings) {
+    const day = r.createdAt.slice(0, 10)
+    if (day < start || day > end) continue
+    const kind = kindForMedia(r.mediaType)
+    const m = meta.get(reviewKey(kind, r.tmdbId))
+    out.push({
+      tmdbId: r.tmdbId,
+      kind,
+      name: m?.name ?? null,
+      posterPath: m?.posterPath ?? null,
+      score: r.score,
+    })
+  }
+
+  return out
+    .sort((a, b) => b.score - a.score || (a.name ?? '').localeCompare(b.name ?? ''))
+    .slice(0, TOP_RATED)
+}
+
+// --- Monthly shape ----------------------------------------------------------
+
+export interface MonthlyBucket {
+  month: number // 1-12
+  minutes: number
+}
+
+/** Minutes watched per calendar month of a year — the shape of a year, rather
+ *  than one number for it. Always twelve buckets, so quiet months read as
+ *  genuinely quiet instead of being dropped from the chart. */
+export function monthlyMinutes(
+  watches: DatedWatch[],
+  meta: Map<string, ReviewTitleMeta>,
+  year: number,
+): MonthlyBucket[] {
+  const buckets: MonthlyBucket[] = Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1,
+    minutes: 0,
+  }))
+  const prefix = `${year}-`
+  for (const w of watches) {
+    if (!w.watchedAt.startsWith(prefix)) continue
+    const month = Number(w.watchedAt.slice(5, 7))
+    if (month < 1 || month > 12) continue
+    buckets[month - 1].minutes += minutesFor(w.kind, meta.get(reviewKey(w.kind, w.tmdbId)))
+  }
+  return buckets
+}
+
+export const MONTH_SHORT = MONTHS.map((m) => m.slice(0, 3))

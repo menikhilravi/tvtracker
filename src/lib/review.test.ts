@@ -1,13 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import {
   aggregateReview,
+  charactersInPeriod,
   daysInMonth,
   isCurrentPeriod,
+  kindForMedia,
   longestRun,
+  minutesFor,
+  monthlyMinutes,
   periodLabel,
   periodRange,
   reviewKey,
   shiftPeriod,
+  topRatedInPeriod,
+  MONTH_SHORT,
+  type DatedRating,
+  type DatedVote,
   type DatedWatch,
   type Period,
   type ReviewTitleMeta,
@@ -289,5 +297,179 @@ describe('aggregateReview', () => {
     const a = aggregateReview(watches, meta([]), AUG)
     const b = aggregateReview([...watches].reverse(), meta([]), AUG)
     expect(a).toEqual(b)
+  })
+})
+
+// --- charactersInPeriod -----------------------------------------------------
+
+const vote = (personId: number, day: string, over: Partial<DatedVote> = {}): DatedVote => ({
+  personId,
+  characterName: `Character ${personId}`,
+  actorName: `Actor ${personId}`,
+  profilePath: null,
+  createdAt: `${day}T12:00:00.000Z`,
+  ...over,
+})
+
+describe('kindForMedia', () => {
+  it('maps media types onto watch kinds', () => {
+    expect(kindForMedia('tv')).toBe('episode')
+    expect(kindForMedia('movie')).toBe('movie')
+  })
+})
+
+describe('minutesFor', () => {
+  it('uses the cached runtime when present', () => {
+    expect(minutesFor('episode', { name: null, posterPath: null, minutes: 22, genres: [] })).toBe(22)
+  })
+
+  it('falls back per kind when runtime is missing or zero', () => {
+    expect(minutesFor('episode', undefined)).toBe(40)
+    expect(minutesFor('movie', undefined)).toBe(115)
+    // A zero runtime is bad data, not "no time at all".
+    expect(minutesFor('movie', { name: null, posterPath: null, minutes: 0, genres: [] })).toBe(115)
+  })
+})
+
+describe('charactersInPeriod', () => {
+  it('is empty with no votes', () => {
+    expect(charactersInPeriod([], AUG)).toEqual([])
+  })
+
+  it('excludes votes outside the period', () => {
+    expect(charactersInPeriod([vote(1, '2026-07-31'), vote(2, '2026-09-01')], AUG)).toEqual([])
+  })
+
+  // The same person can be picked at title, season and episode scope; the
+  // review should show them once, not three times.
+  it('collapses repeat votes for one person into a count', () => {
+    const votes = [vote(1, '2026-08-01'), vote(1, '2026-08-02'), vote(1, '2026-08-03')]
+    const out = charactersInPeriod(votes, AUG)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ personId: 1, votes: 3 })
+  })
+
+  it('ranks by vote count', () => {
+    const votes = [vote(1, '2026-08-01'), vote(2, '2026-08-01'), vote(2, '2026-08-02')]
+    expect(charactersInPeriod(votes, AUG).map((c) => c.personId)).toEqual([2, 1])
+  })
+
+  it('takes display fields from the earliest vote regardless of input order', () => {
+    const early = vote(1, '2026-08-01', { characterName: 'Early', actorName: 'A' })
+    const late = vote(1, '2026-08-20', { characterName: 'Late', actorName: 'A' })
+    expect(charactersInPeriod([late, early], AUG)[0].characterName).toBe('Early')
+    expect(charactersInPeriod([early, late], AUG)[0].characterName).toBe('Early')
+  })
+
+  it('does not leak its internal ordering field', () => {
+    expect(Object.keys(charactersInPeriod([vote(1, '2026-08-01')], AUG)[0])).not.toContain('first')
+  })
+})
+
+// --- topRatedInPeriod -------------------------------------------------------
+
+const rating = (
+  tmdbId: number,
+  score: number,
+  day: string,
+  mediaType: 'movie' | 'tv' = 'movie',
+): DatedRating => ({ tmdbId, mediaType, score, createdAt: `${day}T12:00:00.000Z` })
+
+describe('topRatedInPeriod', () => {
+  it('excludes ratings outside the period', () => {
+    expect(topRatedInPeriod([rating(1, 10, '2025-12-31')], meta([]), YEAR)).toEqual([])
+  })
+
+  it('sorts by score, highest first', () => {
+    const rows = [rating(1, 6, '2026-08-01'), rating(2, 10, '2026-08-02'), rating(3, 8, '2026-08-03')]
+    expect(topRatedInPeriod(rows, meta([]), AUG).map((r) => r.tmdbId)).toEqual([2, 3, 1])
+  })
+
+  it('resolves tv ratings against the episode-keyed meta map', () => {
+    const m = meta([[reviewKey('episode', 9), { name: 'Severance' }]])
+    const out = topRatedInPeriod([rating(9, 9, '2026-08-01', 'tv')], m, AUG)
+    expect(out[0]).toMatchObject({ name: 'Severance', kind: 'episode' })
+  })
+
+  it('keeps a show and a movie with the same id distinct', () => {
+    const m = meta([
+      [reviewKey('episode', 4), { name: 'Show' }],
+      [reviewKey('movie', 4), { name: 'Film' }],
+    ])
+    const out = topRatedInPeriod(
+      [rating(4, 9, '2026-08-01', 'tv'), rating(4, 8, '2026-08-01', 'movie')],
+      m,
+      AUG,
+    )
+    expect(out.map((r) => r.name)).toEqual(['Show', 'Film'])
+  })
+
+  it('breaks score ties deterministically', () => {
+    const m = meta([
+      [reviewKey('movie', 1), { name: 'Zodiac' }],
+      [reviewKey('movie', 2), { name: 'Arrival' }],
+    ])
+    const rows = [rating(1, 9, '2026-08-01'), rating(2, 9, '2026-08-02')]
+    const forward = topRatedInPeriod(rows, m, AUG).map((r) => r.name)
+    const backward = topRatedInPeriod([...rows].reverse(), m, AUG).map((r) => r.name)
+    expect(forward).toEqual(['Arrival', 'Zodiac'])
+    expect(forward).toEqual(backward)
+  })
+})
+
+// --- monthlyMinutes ---------------------------------------------------------
+
+describe('monthlyMinutes', () => {
+  it('always returns twelve buckets, in order', () => {
+    const out = monthlyMinutes([], meta([]), 2026)
+    expect(out).toHaveLength(12)
+    expect(out.map((b) => b.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    expect(out.every((b) => b.minutes === 0)).toBe(true)
+  })
+
+  it('places watches in the right month', () => {
+    const m = meta([[reviewKey('movie', 1), { minutes: 100 }]])
+    const out = monthlyMinutes(
+      [watch('movie', 1, '2026-01-15'), watch('movie', 1, '2026-12-31')],
+      m,
+      2026,
+    )
+    expect(out[0].minutes).toBe(100)
+    expect(out[11].minutes).toBe(100)
+    expect(out[5].minutes).toBe(0)
+  })
+
+  it('ignores other years', () => {
+    const out = monthlyMinutes([watch('movie', 1, '2025-06-01')], meta([]), 2026)
+    expect(out.every((b) => b.minutes === 0)).toBe(true)
+  })
+
+  // The year filter is a string prefix; '2026' must not swallow '20260' style
+  // corruption or match a year that merely starts with the same digits.
+  it('does not match a different year sharing a prefix', () => {
+    const out = monthlyMinutes([watch('movie', 1, '2026-06-01')], meta([]), 202)
+    expect(out.every((b) => b.minutes === 0)).toBe(true)
+  })
+
+  it('agrees with the period total for the same year', () => {
+    const m = meta([
+      [reviewKey('episode', 1), { minutes: 25 }],
+      [reviewKey('movie', 2), { minutes: 130 }],
+    ])
+    const watches = [
+      watch('episode', 1, '2026-03-02'),
+      watch('episode', 1, '2026-03-03'),
+      watch('movie', 2, '2026-11-20'),
+    ]
+    const monthly = monthlyMinutes(watches, m, 2026).reduce((a, b) => a + b.minutes, 0)
+    expect(monthly).toBe(aggregateReview(watches, m, YEAR).minutes)
+  })
+})
+
+describe('MONTH_SHORT', () => {
+  it('has twelve three-letter labels', () => {
+    expect(MONTH_SHORT).toHaveLength(12)
+    expect(MONTH_SHORT[0]).toBe('Jan')
+    expect(MONTH_SHORT[11]).toBe('Dec')
   })
 })

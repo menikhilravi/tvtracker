@@ -9,7 +9,7 @@ import { supabase } from './supabase'
 import { useAuth } from './auth'
 import { getTitle } from './tmdb'
 import type { MediaType, TitleDetail } from './types'
-import type { DatedWatch } from './review'
+import type { DatedRating, DatedVote, DatedWatch } from './review'
 
 // What we persist to the shared `titles` cache. The detail fields are optional
 // because not every call site has them: UpNext, for one, builds a list-shaped
@@ -541,6 +541,7 @@ export function useRating(title: Pick<TitleDetail, 'id' | 'media_type' | 'title'
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['rating', title.id, title.media_type] })
       qc.invalidateQueries({ queryKey: ['ratings', 'all'] })
+      qc.invalidateQueries({ queryKey: ['dated-ratings'] })
     },
   })
 
@@ -666,6 +667,7 @@ export function useToggleCharacterVote(
     onSuccess: () => {
       // Prefix match invalidates every scope (title, season, episode) for this title.
       qc.invalidateQueries({ queryKey: ['character-votes', title.media_type, title.id] })
+      qc.invalidateQueries({ queryKey: ['dated-character-votes'] })
     },
   })
 }
@@ -1251,6 +1253,67 @@ export function useDatedWatches() {
           watchedAt: m.watched_at,
         })),
       ]
+    },
+  })
+}
+
+// Ratings and character votes with their dates, for the period review. The
+// lifetime equivalents (useAllRatings, useCharacterVotes) drop created_at
+// because nothing else needs it.
+export function useDatedRatings() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['dated-ratings'],
+    enabled: Boolean(supabase && session),
+    queryFn: async (): Promise<DatedRating[]> => {
+      const rows = await fetchAllRows<{
+        tmdb_id: number
+        media_type: MediaType
+        score: number
+        created_at: string
+      }>((from, to) =>
+        supabase!
+          .from('ratings')
+          .select('tmdb_id, media_type, score, created_at')
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
+      return rows.map((r) => ({
+        tmdbId: r.tmdb_id,
+        mediaType: r.media_type,
+        score: r.score,
+        createdAt: r.created_at,
+      }))
+    },
+  })
+}
+
+export function useDatedCharacterVotes() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['dated-character-votes'],
+    enabled: Boolean(supabase && session),
+    queryFn: async (): Promise<DatedVote[]> => {
+      const rows = await fetchAllRows<{
+        person_id: number
+        character_name: string | null
+        actor_name: string | null
+        profile_path: string | null
+        created_at: string
+      }>((from, to) =>
+        supabase!
+          .from('character_votes')
+          .select('person_id, character_name, actor_name, profile_path, created_at')
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
+      return rows.map((r) => ({
+        personId: r.person_id,
+        characterName: r.character_name,
+        actorName: r.actor_name,
+        profilePath: r.profile_path,
+        createdAt: r.created_at,
+      }))
     },
   })
 }

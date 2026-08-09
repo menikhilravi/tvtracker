@@ -1,12 +1,23 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { useCachedTitles, useDatedWatches, useFollows } from '../lib/tracking'
+import {
+  useCachedTitles,
+  useDatedCharacterVotes,
+  useDatedRatings,
+  useDatedWatches,
+  useFollows,
+} from '../lib/tracking'
 import {
   aggregateReview,
+  charactersInPeriod,
   isCurrentPeriod,
+  monthlyMinutes,
   periodLabel,
   reviewKey,
   shiftPeriod,
+  topRatedInPeriod,
+  MONTH_SHORT,
+  type MonthlyBucket,
   type Period,
   type ReviewTitleMeta,
 } from '../lib/review'
@@ -38,6 +49,8 @@ export function Review() {
   const watches = useDatedWatches()
   const cached = useCachedTitles()
   const follows = useFollows()
+  const datedRatings = useDatedRatings()
+  const votes = useDatedCharacterVotes()
 
   // Runtime and genres come from the cached `titles` rows; names and posters
   // fall back to the follow row, so a title that hasn't been synced yet still
@@ -65,6 +78,10 @@ export function Review() {
   }
   const isLoading = watches.isLoading || cached.isLoading || follows.isLoading
   const summary = aggregateReview(watches.data ?? [], meta, period)
+  const characters = charactersInPeriod(votes.data ?? [], period)
+  const topRated = topRatedInPeriod(datedRatings.data ?? [], meta, period)
+  const monthly =
+    period.kind === 'year' ? monthlyMinutes(watches.data ?? [], meta, period.year) : null
   const time = formatWatchTime(summary.minutes)
   const label = periodLabel(period)
   const current = isCurrentPeriod(period, now)
@@ -183,6 +200,15 @@ export function Review() {
                 </p>
               )}
 
+              {monthly && (
+                <section className="mt-7">
+                  <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">
+                    Across the year
+                  </h2>
+                  <MonthlyChart buckets={monthly} />
+                </section>
+              )}
+
               {summary.topTitles.length > 0 && (
                 <section className="mt-7">
                   <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">
@@ -225,11 +251,75 @@ export function Review() {
                 </section>
               )}
 
+              {topRated.length > 0 && (
+                <section className="mt-7">
+                  <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">
+                    Rated highest
+                  </h2>
+                  <div className="grid grid-cols-3 gap-3">
+                    {topRated.map((r) => (
+                      <Link
+                        key={`${r.kind}-${r.tmdbId}`}
+                        to={`/title/${r.kind === 'episode' ? 'tv' : 'movie'}/${r.tmdbId}`}
+                        className="active:scale-[0.97]"
+                      >
+                        <div className="relative">
+                          <Poster
+                            path={r.posterPath}
+                            alt={r.name ?? ''}
+                            size="w342"
+                            className="aspect-[2/3] w-full shadow-lg shadow-black/40"
+                          />
+                          <span className="absolute left-1.5 top-1.5 rounded-md bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold text-black shadow">
+                            ★ {r.score}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 truncate text-xs font-medium text-ink/90">
+                          {r.name ?? 'Unknown title'}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {characters.length > 0 && (
+                <section className="mt-7">
+                  <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">
+                    Favorite characters
+                  </h2>
+                  <div className="no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+                    {characters.map((c) => (
+                      <Link
+                        key={c.personId}
+                        to={`/person/${c.personId}`}
+                        className="w-20 shrink-0 text-center active:scale-[0.97]"
+                      >
+                        <Poster
+                          path={c.profilePath}
+                          alt={c.actorName ?? ''}
+                          size="w200"
+                          rounded="rounded-full"
+                          className="h-20 w-20"
+                        />
+                        <p className="mt-1.5 truncate text-xs font-medium text-ink/90">
+                          {c.characterName || c.actorName || 'Unknown'}
+                        </p>
+                        <p className="truncate text-[11px] text-faint">
+                          {c.votes > 1 ? `${c.votes} picks` : (c.actorName ?? '')}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* The one thing a period view can't see; better said than hidden. */}
               <p className="mt-7 text-[11px] leading-relaxed text-faint">
                 Episodes count once, on the day you first watched them — rewatches increment a
                 counter without a date of their own, so they can't be placed in a period. Movie
-                rewatches are dated individually and do count.
+                rewatches are dated individually and do count. “Rated highest” covers scores you
+                gave a whole show or film; per-episode scores aren't dated, so they're left out.
               </p>
             </>
           )}
@@ -245,6 +335,30 @@ function Tile({ icon, value, label }: { icon: string; value: number; label: stri
       <div className="text-lg">{icon}</div>
       <div className="mt-1 text-2xl font-bold tracking-tight">{value}</div>
       <div className="mt-0.5 text-[11px] uppercase tracking-wide text-faint">{label}</div>
+    </div>
+  )
+}
+
+// Minutes per month across a year. One series, common baseline, direct labels —
+// empty months keep their slot so a quiet stretch reads as quiet.
+function MonthlyChart({ buckets }: { buckets: MonthlyBucket[] }) {
+  const max = Math.max(1, ...buckets.map((b) => b.minutes))
+  return (
+    <div className="flex items-end justify-between gap-1">
+      {buckets.map((b) => {
+        const hours = Math.round(b.minutes / 60)
+        return (
+          <div key={b.month} className="flex flex-1 flex-col items-center gap-1">
+            <span className="h-3 text-[9px] tabular-nums text-faint">{hours || ''}</span>
+            <div
+              className="w-full max-w-7 rounded-t-[3px] bg-brand-gradient"
+              style={{ height: b.minutes ? Math.max(3, Math.round((b.minutes / max) * 88)) : 0 }}
+              title={`${MONTH_SHORT[b.month - 1]}: ${hours}h`}
+            />
+            <span className="text-[9px] text-muted">{MONTH_SHORT[b.month - 1]}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
