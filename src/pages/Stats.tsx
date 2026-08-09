@@ -40,6 +40,13 @@ export function Stats() {
       ) : (
         <>
           <StatsSection />
+          <Link
+            to="/review"
+            className="mt-3 flex items-center justify-between rounded-2xl border border-line bg-surface/60 px-5 py-3.5 font-medium active:scale-[0.98]"
+          >
+            <span>🗓️ Year & month in review</span>
+            <span className="text-faint">›</span>
+          </Link>
           <SyncHint />
           <ActivitySection />
 

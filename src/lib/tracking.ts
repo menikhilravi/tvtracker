@@ -9,6 +9,7 @@ import { supabase } from './supabase'
 import { useAuth } from './auth'
 import { getTitle } from './tmdb'
 import type { MediaType, TitleDetail } from './types'
+import type { DatedWatch } from './review'
 
 // What we persist to the shared `titles` cache. The detail fields are optional
 // because not every call site has them: UpNext, for one, builds a list-shaped
@@ -1206,6 +1207,54 @@ export function useHistory() {
   })
 }
 
+// --- Dated watches (year/month in review) -----------------------------------
+
+// Every watch with both its date and its title, which the lifetime stats don't
+// need — those collapse to a count per show. Paginated, since a large imported
+// history runs well past PostgREST's 1000-row cap.
+//
+// Episodes contribute one row at `watched_at` (their first watch). Rewatches
+// increment a counter with no date of their own, so they can't be placed in a
+// period; see src/lib/review.ts for why booking them against the first watch
+// would be worse than leaving them out.
+export function useDatedWatches() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['dated-watches'],
+    enabled: Boolean(supabase && session),
+    queryFn: async (): Promise<DatedWatch[]> => {
+      const [eps, movies] = await Promise.all([
+        fetchAllRows<{ tmdb_show_id: number; watched_at: string }>((from, to) =>
+          supabase!
+            .from('episode_watches')
+            .select('tmdb_show_id, watched_at')
+            .order('id', { ascending: true })
+            .range(from, to),
+        ),
+        fetchAllRows<{ tmdb_movie_id: number; watched_at: string }>((from, to) =>
+          supabase!
+            .from('movie_watches')
+            .select('tmdb_movie_id, watched_at')
+            .order('id', { ascending: true })
+            .range(from, to),
+        ),
+      ])
+      return [
+        ...eps.map((e) => ({
+          kind: 'episode' as const,
+          tmdbId: e.tmdb_show_id,
+          watchedAt: e.watched_at,
+        })),
+        ...movies.map((m) => ({
+          kind: 'movie' as const,
+          tmdbId: m.tmdb_movie_id,
+          watchedAt: m.watched_at,
+        })),
+      ]
+    },
+  })
+}
+
 // --- Editing watch history --------------------------------------------------
 
 // Every query whose numbers depend on when (or whether) something was watched.
@@ -1213,6 +1262,7 @@ function invalidateWatchQueries(qc: ReturnType<typeof useQueryClient>) {
   for (const key of [
     ['history'],
     ['watch-activity'],
+    ['dated-watches'],
     ['episode-watches'],
     ['movie-watches'],
     ['stats'],
