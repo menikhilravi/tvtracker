@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { searchMulti, getGenres } from '../lib/tmdb'
-import type { MediaType, SearchResult } from '../lib/types'
+import type { MediaType, SearchResult, WatchProvider } from '../lib/types'
 import { Poster } from '../components/Poster'
 import { DiscoverRails } from '../components/DiscoverRails'
-import { ProviderBadge } from '../components/ProviderBadge'
+import { ProviderBadge, useStreamingProviders } from '../components/ProviderBadge'
 import { StatusBadge } from '../components/StatusBadge'
 import { HideTrackedToggle } from '../components/HideTrackedToggle'
 import { trackedKey, useFollowStatusMap } from '../lib/tracking'
@@ -13,6 +13,27 @@ import { useWatchRegion } from '../lib/region'
 import { useHideTracked } from '../lib/uiState'
 
 type TypeFilter = 'all' | MediaType
+
+// Renders the badge and reports the row's streaming services to the parent, so
+// the service filter reuses the fetch the badge was making anyway.
+function ProviderCell({
+  mediaType,
+  id,
+  region,
+  onResolve,
+}: {
+  mediaType: MediaType
+  id: number
+  region: string
+  onResolve: (key: string, list: WatchProvider[]) => void
+}) {
+  const providers = useStreamingProviders(mediaType, id, region)
+  const key = trackedKey(mediaType, id)
+  useEffect(() => {
+    if (providers.length > 0) onResolve(key, providers)
+  }, [key, providers, onResolve])
+  return <ProviderBadge mediaType={mediaType} id={id} region={region} />
+}
 
 const decadeOf = (year: string | null) =>
   year ? String(Math.floor(Number(year) / 10) * 10) : null
@@ -29,6 +50,7 @@ export function Search() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [genre, setGenre] = useState('')
   const [decade, setDecade] = useState('')
+  const [service, setService] = useState<number | null>(null)
 
   // Debounce typing so we don't hit the proxy on every keystroke.
   useEffect(() => {
@@ -79,6 +101,30 @@ export function Search() {
   const activeGenre = availableGenres.includes(genre) ? genre : ''
   const activeDecade = availableDecades.includes(decade) ? decade : ''
 
+  // `search/multi` has no provider filter, so availability is resolved per
+  // result — the same fetch the badges already make, shared by query key. Each
+  // row reports what it found; nothing extra is requested for the filter.
+  const [providersById, setProvidersById] = useState<Map<string, WatchProvider[]>>(new Map())
+
+  // Availability is per-region and per-query, and only rendered rows can report
+  // it — a row hidden by the service filter can't correct itself. Clearing on
+  // either change avoids filtering against data gathered for a different region.
+  useEffect(() => {
+    setProvidersById(new Map())
+    setService(null)
+  }, [region, query])
+  const reportProviders = useCallback((key: string, list: WatchProvider[]) => {
+    setProvidersById((prev) => {
+      const existing = prev.get(key)
+      if (existing && existing.length === list.length && existing.every((p, i) => p.id === list[i].id)) {
+        return prev
+      }
+      const next = new Map(prev)
+      next.set(key, list)
+      return next
+    })
+  }, [])
+
   const matching = useMemo(
     () =>
       results.filter((r) => {
@@ -93,14 +139,37 @@ export function Search() {
   // Search doubles as navigation — it's how you reach a show you already track
   // to mark an episode. So "New only" never silently swallows a match: what it
   // hides is counted and one tap away.
+  const byService = useMemo(
+    () =>
+      service === null
+        ? matching
+        : matching.filter((r) =>
+            (providersById.get(trackedKey(r.media_type, r.id)) ?? []).some((p) => p.id === service),
+          ),
+    [matching, service, providersById],
+  )
+
   const filtered = useMemo(
     () =>
       hideTracked
-        ? matching.filter((r) => !statusByKey.has(trackedKey(r.media_type, r.id)))
-        : matching,
-    [matching, hideTracked, statusByKey],
+        ? byService.filter((r) => !statusByKey.has(trackedKey(r.media_type, r.id)))
+        : byService,
+    [byService, hideTracked, statusByKey],
   )
-  const hiddenCount = matching.length - filtered.length
+  const hiddenCount = byService.length - filtered.length
+
+  // Services offered by anything in the current results, so the picker only
+  // lists choices that would actually narrow something.
+  const availableServices = useMemo(() => {
+    const map = new Map<number, WatchProvider>()
+    for (const r of matching) {
+      for (const p of providersById.get(trackedKey(r.media_type, r.id)) ?? []) {
+        if (!map.has(p.id)) map.set(p.id, p)
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [matching, providersById])
+  const activeService = availableServices.some((p) => p.id === service) ? service : null
 
   return (
     <div className="min-h-dvh">
@@ -196,14 +265,30 @@ export function Search() {
               </select>
             )}
 
+            {availableServices.length > 0 && (
+              <select
+                value={activeService ?? ''}
+                onChange={(e) => setService(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-muted outline-none focus:border-brand/60"
+              >
+                <option value="">Any service</option>
+                {availableServices.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             <HideTrackedToggle />
 
-            {(typeFilter !== 'all' || activeGenre || activeDecade) && (
+            {(typeFilter !== 'all' || activeGenre || activeDecade || activeService !== null) && (
               <button
                 onClick={() => {
                   setTypeFilter('all')
                   setGenre('')
                   setDecade('')
+                  setService(null)
                 }}
                 className="text-xs text-brand active:opacity-70"
               >
@@ -234,7 +319,12 @@ export function Search() {
                   </div>
                   <div className="flex items-center gap-2 text-xs text-faint">
                     <span>{r.year ?? '—'}</span>
-                    <ProviderBadge mediaType={r.media_type} id={r.id} region={region} />
+                    <ProviderCell
+                      mediaType={r.media_type}
+                      id={r.id}
+                      region={region}
+                      onResolve={reportProviders}
+                    />
                   </div>
                   <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{r.overview}</p>
                 </div>

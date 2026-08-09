@@ -36,8 +36,24 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^genre\/(movie|tv)\/list$/, params: [] },
   {
     pattern: /^discover\/(movie|tv)$/,
-    params: ['with_genres', 'with_original_language', 'sort_by', 'page', 'include_adult'],
+    params: [
+      'with_genres',
+      'with_original_language',
+      'sort_by',
+      'page',
+      'include_adult',
+      // Browse by streaming service. `watch_region` is required by TMDB
+      // whenever `with_watch_providers` is set, and the monetization filter
+      // keeps results to things included with a subscription rather than
+      // everything the service will also rent you.
+      'with_watch_providers',
+      'watch_region',
+      'with_watch_monetization_types',
+      'vote_count.gte',
+    ],
   },
+  // The streaming services available in a region, for the browse-by-service picker.
+  { pattern: /^watch\/providers\/(movie|tv)$/, params: ['watch_region'] },
   // Convert an external id (e.g. TheTVDB) to a TMDB id — used by the importer.
   { pattern: /^find\/[^/]+$/, params: ['external_source'] },
 ]

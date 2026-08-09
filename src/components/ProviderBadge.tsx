@@ -1,25 +1,45 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getTitle, IMG } from '../lib/tmdb'
 import type { MediaType, WatchProvider } from '../lib/types'
 
-// The top streaming provider for a title in a region, or null. Reuses the
-// detail page's query key so a fetch here warms (and is warmed by) that page,
-// and is cached 1h at the edge. TMDB has no batch endpoint — this is one
-// request per title — so only use it on bounded lists (e.g. search results).
-export function useTopProvider(
+// Every streaming provider for a title in a region. Reuses the detail page's
+// query key so a fetch here warms (and is warmed by) that page, and is cached
+// 1h at the edge. TMDB has no batch endpoint — this is one request per title —
+// so only use it on bounded lists (e.g. search results).
+//
+// Discovery browses by service through `discover/…?with_watch_providers`
+// instead, which filters server-side; this per-title path exists for lists TMDB
+// can't filter, like text-search results.
+export function useStreamingProviders(
   mediaType: MediaType,
   id: number,
   region: string,
-): WatchProvider | null {
+): WatchProvider[] {
   const { data } = useQuery({
     queryKey: ['title', mediaType, id],
     queryFn: () => getTitle(mediaType, id),
     staleTime: 60 * 60 * 1000,
   })
-  const r = data?.watchProviders[region]
-  if (!r) return null
-  // "Streaming" = anything you can watch without paying per-title.
-  return r.flatrate[0] ?? r.free[0] ?? r.ads[0] ?? null
+  // Memoized so the identity is stable across renders: callers put this in
+  // effect dependencies, and a fresh array each render would re-fire them.
+  return useMemo(() => {
+    const r = data?.watchProviders[region]
+    if (!r) return []
+    // "Streaming" = anything you can watch without paying per-title.
+    const seen = new Map<number, WatchProvider>()
+    for (const p of [...r.flatrate, ...r.free, ...r.ads]) if (!seen.has(p.id)) seen.set(p.id, p)
+    return [...seen.values()]
+  }, [data, region])
+}
+
+/** The single most prominent streaming provider, for a compact badge. */
+export function useTopProvider(
+  mediaType: MediaType,
+  id: number,
+  region: string,
+): WatchProvider | null {
+  return useStreamingProviders(mediaType, id, region)[0] ?? null
 }
 
 // A small provider logo shown on list rows ("Streaming on Netflix").

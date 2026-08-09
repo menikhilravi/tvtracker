@@ -457,3 +457,63 @@ export async function discoverByLanguage(
   })
   return toResults(data.results, mediaType)
 }
+
+// --- Streaming services -----------------------------------------------------
+
+// "Streaming" throughout the app means watchable without paying per title, so
+// the same three monetization types the provider badges and the Tonight screen
+// use. TMDB takes them pipe-separated as an OR.
+const STREAMING_TYPES = 'flatrate|free|ads'
+
+// Discover is ranked by raw popularity, which floats thin titles with a handful
+// of votes to the top of a service's shelf. A modest vote floor keeps the
+// browse view to things enough people have actually rated.
+const MIN_VOTES = 50
+
+/** How a service's catalogue is ordered. */
+export type ServiceSort = 'popular' | 'top_rated' | 'new'
+
+const SORT_PARAM: Record<ServiceSort, string> = {
+  popular: 'popularity.desc',
+  top_rated: 'vote_average.desc',
+  new: 'primary_release_date.desc',
+}
+
+/** The streaming services available in a region, most prominent first. */
+export async function getProviders(
+  mediaType: MediaType,
+  region: string,
+): Promise<WatchProvider[]> {
+  const data = await proxy<{
+    results?: {
+      provider_id: number
+      provider_name: string
+      logo_path?: string | null
+      display_priority?: number
+    }[]
+  }>(`watch/providers/${mediaType}`, { watch_region: region })
+
+  return (data.results ?? [])
+    .slice()
+    .sort((a, b) => (a.display_priority ?? 999) - (b.display_priority ?? 999))
+    .map((p) => ({ id: p.provider_id, name: p.provider_name, logoPath: p.logo_path ?? null }))
+}
+
+/** What a service is streaming in a region. Filtered server-side, so this is a
+ *  single request rather than a provider lookup per title. */
+export async function discoverByProvider(
+  mediaType: MediaType,
+  providerId: number,
+  region: string,
+  sort: ServiceSort = 'popular',
+): Promise<SearchResult[]> {
+  const data = await proxy<{ results: RawMultiItem[] }>(`discover/${mediaType}`, {
+    with_watch_providers: String(providerId),
+    watch_region: region,
+    with_watch_monetization_types: STREAMING_TYPES,
+    sort_by: SORT_PARAM[sort],
+    'vote_count.gte': String(MIN_VOTES),
+    include_adult: 'false',
+  })
+  return toResults(data.results, mediaType)
+}
