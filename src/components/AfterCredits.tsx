@@ -4,17 +4,22 @@
 // and BTS videos, fan reviews, the episode-ratings curve, stills, and fact
 // cards computed from TMDB + your own watch history.
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueries } from '@tanstack/react-query'
-import { getSeason, IMG } from '../lib/tmdb'
-import type { Episode, Review, TitleDetail, Video } from '../lib/types'
+import { getPerson, getSeason, IMG } from '../lib/tmdb'
+import type { Episode, Review, SearchResult, TitleDetail, Video } from '../lib/types'
+import { Poster } from './Poster'
 import { useAuth } from '../lib/auth'
 import {
+  trackedKey,
   useFollow,
+  useFollowStatusMap,
   useEpisodeWatches,
   useMovieWatchCounts,
   useRating,
   FALLBACK_EPISODE_MINUTES,
   FALLBACK_MOVIE_MINUTES,
+  type FollowStatus,
 } from '../lib/tracking'
 
 export function AfterCredits({ title }: { title: TitleDetail }) {
@@ -116,6 +121,8 @@ function Feed({
         {title.media_type === 'tv' && (
           <RatingCurveCard show={title} watchedSet={watchedSet ?? new Set()} />
         )}
+
+        <CastConnections title={title} />
 
         {leadVideos.map((v) => (
           <VideoCard key={v.key} video={v} />
@@ -375,6 +382,89 @@ function RatingLine({ episodes, watchedSet }: { episodes: Episode[]; watchedSet:
         </p>
       )}
       <p className="mt-1 text-[10px] text-faint">Filled dots are episodes you've seen · tap a dot for details</p>
+    </div>
+  )
+}
+
+// --- Cast connections ("seen them before?") ---------------------------------
+
+const CONNECTION_LABEL: Record<FollowStatus, string> = {
+  watchlist: 'on your watchlist',
+  watching: "you're watching it",
+  completed: 'you finished it',
+  dropped: 'you stopped it',
+}
+
+// Cross-reference the top-billed cast's filmographies against your library:
+// "Pedro Pascal is also in The Last of Us — you're watching it." Person
+// lookups share the ['person', id] cache with the actor page.
+function CastConnections({ title }: { title: TitleDetail }) {
+  const top = title.cast.slice(0, 6)
+  const people = useQueries({
+    queries: top.map((c) => ({
+      queryKey: ['person', c.id],
+      queryFn: () => getPerson(c.id),
+    })),
+  })
+  const statusByKey = useFollowStatusMap()
+
+  const connections: {
+    actor: TitleDetail['cast'][number]
+    credit: SearchResult
+    status: FollowStatus
+  }[] = []
+  top.forEach((actor, i) => {
+    const person = people[i].data
+    if (!person) return
+    // Their most popular credit that's in your library and isn't this title.
+    const credit = person.credits.find(
+      (cr) =>
+        !(cr.id === title.id && cr.media_type === title.media_type) &&
+        statusByKey.has(trackedKey(cr.media_type, cr.id)),
+    )
+    if (credit) connections.push({ actor, credit, status: statusByKey.get(trackedKey(credit.media_type, credit.id))! })
+  })
+
+  if (connections.length === 0) return null
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface/60 p-4">
+      <p className="text-sm font-semibold">Seen them before?</p>
+      <div className="mt-1 divide-y divide-line">
+        {connections.slice(0, 5).map(({ actor, credit, status }) => (
+          <Link
+            key={actor.id}
+            to={`/title/${credit.media_type}/${credit.id}`}
+            className="flex items-center gap-3 py-2.5 active:opacity-70"
+          >
+            <Poster
+              path={actor.profilePath}
+              alt={actor.name}
+              size="w200"
+              rounded="rounded-full"
+              className="h-10 w-10 shrink-0"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm">
+                <span className="font-medium">{actor.name}</span>
+                <span className="text-muted"> is also in </span>
+                <span className="font-medium">{credit.title}</span>
+              </p>
+              <p className="text-[11px] text-faint">
+                {CONNECTION_LABEL[status]}
+                {actor.character ? ` · plays ${actor.character} here` : ''}
+              </p>
+            </div>
+            <Poster
+              path={credit.posterPath}
+              alt={credit.title}
+              size="w200"
+              rounded="rounded-md"
+              className="h-14 w-10 shrink-0"
+            />
+          </Link>
+        ))}
+      </div>
     </div>
   )
 }

@@ -408,6 +408,40 @@ export async function getSeason(showId: number, seasonNumber: number): Promise<E
   }))
 }
 
+// --- Single episode (guest stars & crew) ------------------------------------
+
+export interface EpisodeExtras {
+  guestStars: { id: number; name: string; character: string; profilePath: string | null }[]
+  directors: string[]
+  writers: string[]
+}
+
+// The episode endpoint carries guest_stars and crew in its base response.
+// Requires the proxy's episode route — an older deploy 400s, which callers
+// should treat as "no extras" rather than an error.
+export async function getEpisodeExtras(
+  showId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<EpisodeExtras> {
+  const data = await proxy<{
+    guest_stars?: { id: number; name: string; character?: string; profile_path?: string | null }[]
+    crew?: { job?: string; name?: string }[]
+  }>(`tv/${showId}/season/${seasonNumber}/episode/${episodeNumber}`)
+  const crewNames = (job: string) =>
+    [...new Set((data.crew ?? []).filter((c) => c.job === job && c.name).map((c) => c.name!))]
+  return {
+    guestStars: (data.guest_stars ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      character: g.character ?? '',
+      profilePath: g.profile_path ?? null,
+    })),
+    directors: crewNames('Director'),
+    writers: crewNames('Writer'),
+  }
+}
+
 // --- Trending (discovery) ---------------------------------------------------
 
 export async function getTrending(window: 'day' | 'week' = 'week'): Promise<SearchResult[]> {

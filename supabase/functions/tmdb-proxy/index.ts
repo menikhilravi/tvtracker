@@ -24,6 +24,8 @@ const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^movie\/\d+$/, params: ['append_to_response', 'include_image_language'] },
   { pattern: /^tv\/\d+$/, params: ['append_to_response', 'include_image_language'] },
   { pattern: /^tv\/\d+\/season\/\d+$/, params: [] },
+  // One episode's own page: guest stars + crew for the post-watch view.
+  { pattern: /^tv\/\d+\/season\/\d+\/episode\/\d+$/, params: [] },
   { pattern: /^trending\/(all|movie|tv)\/(day|week)$/, params: ['page'] },
   // Discovery: popular / top-rated shelves and per-title recommendations.
   { pattern: /^(movie|tv)\/popular$/, params: ['page'] },

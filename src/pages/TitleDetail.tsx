@@ -6,6 +6,7 @@ import {
   getSeason,
   getSimilarTitles,
   getCollection,
+  getEpisodeExtras,
   streamingIn,
   rentBuyIn,
   IMG,
@@ -878,6 +879,76 @@ function SeasonEpisodes({
   )
 }
 
+// Guest stars + crew for one episode. Guest stars are the fun of "wait, was
+// that—?", so they stay hidden until the episode is marked watched — a cameo
+// list is a spoiler. Crew credits aren't, and show right away. Requires the
+// proxy's episode route; an older deploy just renders nothing.
+function EpisodeExtrasSection({
+  show,
+  episode,
+  watched,
+}: {
+  show: TitleDetailType
+  episode: Episode
+  watched: boolean
+}) {
+  const { session } = useAuth()
+  const { data } = useQuery({
+    queryKey: ['episode-extras', show.id, episode.seasonNumber, episode.episodeNumber],
+    queryFn: () =>
+      getEpisodeExtras(show.id, episode.seasonNumber, episode.episodeNumber).catch(() => null),
+  })
+  if (!data) return null
+
+  const crewLine = [
+    data.directors.length > 0 && `Directed by ${data.directors.join(', ')}`,
+    data.writers.length > 0 && `Written by ${data.writers.slice(0, 2).join(', ')}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div className="mt-4">
+      {crewLine && <p className="text-xs text-faint">{crewLine}</p>}
+
+      {data.guestStars.length > 0 &&
+        (watched ? (
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-medium text-faint">
+              Guest stars in this episode
+            </p>
+            <div className="no-scrollbar -mx-5 flex gap-4 overflow-x-auto px-5 pb-1">
+              {data.guestStars.slice(0, 12).map((g) => (
+                <Link
+                  key={g.id}
+                  to={`/person/${g.id}`}
+                  className="w-16 shrink-0 text-center active:scale-[0.97]"
+                >
+                  <Poster
+                    path={g.profilePath}
+                    alt={g.name}
+                    size="w200"
+                    rounded="rounded-full"
+                    className="mx-auto h-16 w-16"
+                  />
+                  <p className="mt-1.5 truncate text-[11px] font-medium">{g.name}</p>
+                  <p className="truncate text-[10px] text-faint">{g.character}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : (
+          session && (
+            <p className="mt-3 rounded-xl border border-dashed border-line bg-surface/40 px-3 py-2.5 text-xs text-muted">
+              🔒 {data.guestStars.length} guest star{data.guestStars.length === 1 ? '' : 's'} drop
+              by this episode — mark it watched to see who.
+            </p>
+          )
+        ))}
+    </div>
+  )
+}
+
 // Full-screen episode details with a per-episode rating. Rating an episode
 // also marks it watched (see useRateEpisode).
 function EpisodeModal({
@@ -941,6 +1012,8 @@ function EpisodeModal({
         {episode.overview && (
           <p className="mt-4 text-sm leading-relaxed text-ink/80">{episode.overview}</p>
         )}
+
+        <EpisodeExtrasSection show={show} episode={episode} watched={watched} />
 
         {session && (
           <div className="mt-6 rounded-2xl border border-line bg-surface/60 p-4">
