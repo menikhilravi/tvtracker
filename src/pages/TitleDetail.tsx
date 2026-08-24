@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getTitle, getSeason, getSimilarTitles, getCollection, IMG } from '../lib/tmdb'
+import {
+  getTitle,
+  getSeason,
+  getSimilarTitles,
+  getCollection,
+  streamingIn,
+  rentBuyIn,
+  IMG,
+} from '../lib/tmdb'
 import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
+import { AfterCredits } from '../components/AfterCredits'
 import { Poster } from '../components/Poster'
 import { PosterRail } from '../components/PosterRail'
 import { RatingStars } from '../components/RatingStars'
@@ -170,6 +179,8 @@ export function TitleDetail() {
           </section>
         )}
 
+        <AfterCredits title={title} />
+
         <div className="mt-7">
           <MoreLikeThis title={title} />
         </div>
@@ -285,18 +296,8 @@ function WhereToWatch({ title }: { title: TitleDetailType }) {
   )
   const data = title.watchProviders[region]
 
-  // Ways to watch without paying per-title, deduped by provider id.
-  const streamMap = new Map<number, WatchProvider>()
-  for (const p of [...(data?.flatrate ?? []), ...(data?.free ?? []), ...(data?.ads ?? [])]) {
-    if (!streamMap.has(p.id)) streamMap.set(p.id, p)
-  }
-  const stream = [...streamMap.values()]
-
-  const rentBuyMap = new Map<number, WatchProvider>()
-  for (const p of [...(data?.rent ?? []), ...(data?.buy ?? [])]) {
-    if (!rentBuyMap.has(p.id)) rentBuyMap.set(p.id, p)
-  }
-  const rentBuy = [...rentBuyMap.values()]
+  const stream = streamingIn(data)
+  const rentBuy = rentBuyIn(data)
 
   return (
     <section className="mt-7">

@@ -9,9 +9,11 @@ import type {
   MediaType,
   Person,
   RegionProviders,
+  Review,
   SearchResult,
   Season,
   TitleDetail,
+  Video,
   WatchProvider,
 } from './types'
 
@@ -140,6 +142,68 @@ interface RawDetail {
   status?: string
   'watch/providers'?: { results?: Record<string, RawRegionProviders> }
   belongs_to_collection?: { id: number; name: string; poster_path?: string | null } | null
+  tagline?: string
+  budget?: number
+  revenue?: number
+  videos?: { results?: RawVideo[] }
+  images?: { backdrops?: { file_path: string; vote_count?: number }[] }
+  reviews?: { results?: RawReview[] }
+  // Appended keywords arrive under `keywords` for movies but `results` for TV.
+  keywords?: { keywords?: { name: string }[]; results?: { name: string }[] }
+}
+
+interface RawVideo {
+  key?: string
+  name?: string
+  site?: string
+  type?: string
+  official?: boolean
+}
+
+interface RawReview {
+  id: string
+  author?: string
+  author_details?: { rating?: number | null; avatar_path?: string | null }
+  content?: string
+  created_at?: string
+  url?: string
+}
+
+// Post-watch interest order: the stuff you want *after* seeing it first, the
+// stuff that sells it to you last.
+const VIDEO_TYPE_ORDER = ['Bloopers', 'Behind the Scenes', 'Featurette', 'Clip', 'Trailer', 'Teaser']
+
+function normalizeVideos(raw?: RawVideo[]): Video[] {
+  return (raw ?? [])
+    .filter((v): v is RawVideo & { key: string } => Boolean(v.key) && v.site === 'YouTube')
+    .map((v) => ({
+      key: v.key,
+      name: v.name ?? '',
+      type: v.type ?? '',
+      official: v.official ?? false,
+    }))
+    .sort((a, b) => {
+      const rank = (t: string) => {
+        const i = VIDEO_TYPE_ORDER.indexOf(t)
+        return i === -1 ? VIDEO_TYPE_ORDER.length : i
+      }
+      const byType = rank(a.type) - rank(b.type)
+      return byType !== 0 ? byType : Number(b.official) - Number(a.official)
+    })
+}
+
+function normalizeReviews(raw?: RawReview[]): Review[] {
+  return (raw ?? [])
+    .filter((r) => (r.content ?? '').trim().length > 0)
+    .map((r) => ({
+      id: r.id,
+      author: r.author || 'Anonymous',
+      rating: r.author_details?.rating ?? null,
+      avatarPath: r.author_details?.avatar_path ?? null,
+      content: r.content ?? '',
+      createdAt: r.created_at ?? null,
+      url: r.url ?? null,
+    }))
 }
 
 interface RawProvider {
@@ -202,7 +266,11 @@ function normalizeProviders(
 
 export async function getTitle(mediaType: MediaType, id: number): Promise<TitleDetail> {
   const data = await proxy<RawDetail>(`${mediaType}/${id}`, {
-    append_to_response: 'credits,watch/providers',
+    append_to_response: 'credits,watch/providers,videos,images,reviews,keywords',
+    // Most textless backdrops are language-tagged `null`; without this TMDB
+    // filters them out of the appended images. The proxy drops the param until
+    // it's redeployed with it allowlisted — the feed just gets fewer stills.
+    include_image_language: 'en,null',
   })
   const seasons: Season[] = (data.seasons ?? [])
     .filter((s) => s.season_number > 0) // hide "Specials" (season 0) by default
@@ -250,6 +318,20 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
           posterPath: data.belongs_to_collection.poster_path ?? null,
         }
       : null,
+    tagline: data.tagline?.trim() || null,
+    budget: data.budget && data.budget > 0 ? data.budget : null,
+    revenue: data.revenue && data.revenue > 0 ? data.revenue : null,
+    videos: normalizeVideos(data.videos?.results),
+    backdrops: (data.images?.backdrops ?? [])
+      .filter((b) => b.file_path && b.file_path !== data.backdrop_path)
+      .sort((a, b) => (b.vote_count ?? 0) - (a.vote_count ?? 0))
+      .slice(0, 10)
+      .map((b) => b.file_path),
+    reviews: normalizeReviews(data.reviews?.results),
+    keywords: [
+      ...(data.keywords?.keywords ?? []),
+      ...(data.keywords?.results ?? []),
+    ].map((k) => k.name),
   }
 }
 
@@ -308,6 +390,7 @@ interface RawSeason {
     overview?: string
     air_date?: string | null
     still_path?: string | null
+    vote_average?: number
   }[]
 }
 
@@ -320,6 +403,8 @@ export async function getSeason(showId: number, seasonNumber: number): Promise<E
     overview: e.overview ?? '',
     airDate: e.air_date ?? null,
     stillPath: e.still_path ?? null,
+    // TMDB reports 0 for "no votes yet" — that's absence, not a score.
+    voteAverage: e.vote_average && e.vote_average > 0 ? e.vote_average : null,
   }))
 }
 
@@ -460,10 +545,36 @@ export async function discoverByLanguage(
 
 // --- Streaming services -----------------------------------------------------
 
-// "Streaming" throughout the app means watchable without paying per title, so
-// the same three monetization types the provider badges and the Tonight screen
-// use. TMDB takes them pipe-separated as an OR.
-const STREAMING_TYPES = 'flatrate|free|ads'
+// "Streaming" throughout the app means watchable without paying per title:
+// included with a subscription, free, or free with ads. Rent and buy are always
+// excluded.
+//
+// The rule shows up in two forms — this list, for filtering a title's own
+// provider data, and STREAMING_TYPES below, which asks TMDB to apply the same
+// filter server-side. Keep them in step.
+const STREAMING_CATEGORIES = ['flatrate', 'free', 'ads'] as const
+const RENT_BUY_CATEGORIES = ['rent', 'buy'] as const
+
+const dedupeById = (lists: WatchProvider[][]): WatchProvider[] => {
+  const seen = new Map<number, WatchProvider>()
+  for (const list of lists) for (const p of list) if (!seen.has(p.id)) seen.set(p.id, p)
+  return [...seen.values()]
+}
+
+/** Ways to watch a title in a region without paying per title. */
+export function streamingIn(region?: RegionProviders): WatchProvider[] {
+  if (!region) return []
+  return dedupeById(STREAMING_CATEGORIES.map((c) => region[c]))
+}
+
+/** Ways to watch that cost money per title. */
+export function rentBuyIn(region?: RegionProviders): WatchProvider[] {
+  if (!region) return []
+  return dedupeById(RENT_BUY_CATEGORIES.map((c) => region[c]))
+}
+
+// The server-side form of STREAMING_CATEGORIES; TMDB takes them pipe-separated.
+const STREAMING_TYPES = STREAMING_CATEGORIES.join('|')
 
 // Discover is ranked by raw popularity, which floats thin titles with a handful
 // of votes to the top of a service's shelf. A modest vote floor keeps the

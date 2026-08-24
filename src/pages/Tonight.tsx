@@ -2,7 +2,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useQueries } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { useFollows } from '../lib/tracking'
-import { getTitle, IMG } from '../lib/tmdb'
+import { getTitle, streamingIn, IMG } from '../lib/tmdb'
 import { useWatchRegion, REGION_NAME } from '../lib/region'
 import { usePersistedState } from '../lib/uiState'
 import { Poster } from '../components/Poster'
@@ -22,16 +22,10 @@ import type { TitleDetail as TitleDetailType, WatchProvider } from '../lib/types
 // search-result badges, so anything you've looked at recently is already warm.
 const MAX_CHECKED = 200
 
-// "Streamable" means watchable without paying per title — the same definition
-// the provider badges use. Rent/buy is deliberately excluded: the question this
-// screen answers is "what can I put on right now at no extra cost".
-function streamingProviders(detail: TitleDetailType, region: string): WatchProvider[] {
-  const r = detail.watchProviders[region]
-  if (!r) return []
-  const seen = new Map<number, WatchProvider>()
-  for (const p of [...r.flatrate, ...r.free, ...r.ads]) if (!seen.has(p.id)) seen.set(p.id, p)
-  return [...seen.values()]
-}
+// Rent/buy is deliberately excluded: the question this screen answers is "what
+// can I put on right now at no extra cost". See streamingIn for the rule.
+const streamingProviders = (detail: TitleDetailType, region: string) =>
+  streamingIn(detail.watchProviders[region])
 
 export function Tonight() {
   const { session } = useAuth()

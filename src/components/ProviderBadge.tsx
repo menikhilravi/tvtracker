@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getTitle, IMG } from '../lib/tmdb'
+import { getTitle, streamingIn, IMG } from '../lib/tmdb'
 import type { MediaType, WatchProvider } from '../lib/types'
 
 // Every streaming provider for a title in a region. Reuses the detail page's
@@ -23,14 +23,7 @@ export function useStreamingProviders(
   })
   // Memoized so the identity is stable across renders: callers put this in
   // effect dependencies, and a fresh array each render would re-fire them.
-  return useMemo(() => {
-    const r = data?.watchProviders[region]
-    if (!r) return []
-    // "Streaming" = anything you can watch without paying per-title.
-    const seen = new Map<number, WatchProvider>()
-    for (const p of [...r.flatrate, ...r.free, ...r.ads]) if (!seen.has(p.id)) seen.set(p.id, p)
-    return [...seen.values()]
-  }, [data, region])
+  return useMemo(() => streamingIn(data?.watchProviders[region]), [data, region])
 }
 
 /** The single most prominent streaming provider, for a compact badge. */

@@ -19,8 +19,10 @@ const TMDB_KEY = Deno.env.get('TMDB_API_KEY') ?? ''
 // `:id` is a numeric placeholder.
 const ROUTES: { pattern: RegExp; params: string[] }[] = [
   { pattern: /^search\/multi$/, params: ['query', 'page', 'include_adult'] },
-  { pattern: /^movie\/\d+$/, params: ['append_to_response'] },
-  { pattern: /^tv\/\d+$/, params: ['append_to_response'] },
+  // `include_image_language` lets appended images keep textless (null-language)
+  // backdrops, which TMDB's default language filter would otherwise drop.
+  { pattern: /^movie\/\d+$/, params: ['append_to_response', 'include_image_language'] },
+  { pattern: /^tv\/\d+$/, params: ['append_to_response', 'include_image_language'] },
   { pattern: /^tv\/\d+\/season\/\d+$/, params: [] },
   { pattern: /^trending\/(all|movie|tv)\/(day|week)$/, params: ['page'] },
   // Discovery: popular / top-rated shelves and per-title recommendations.

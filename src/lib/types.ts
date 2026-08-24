@@ -26,6 +26,7 @@ export interface Episode {
   overview: string
   airDate: string | null
   stillPath: string | null
+  voteAverage: number | null // TMDB community score, null until enough votes
 }
 
 // A minimal episode reference used for "up next" and the upcoming calendar.
@@ -51,6 +52,26 @@ export interface Collection {
   id: number
   name: string
   parts: SearchResult[]
+}
+
+// A YouTube-hosted extra for a title: trailer, teaser, or — the good post-watch
+// stuff — bloopers, behind-the-scenes, and featurettes.
+export interface Video {
+  key: string // YouTube video id
+  name: string
+  type: string // 'Trailer' | 'Teaser' | 'Bloopers' | 'Behind the Scenes' | 'Featurette' | 'Clip' | …
+  official: boolean
+}
+
+// A written review from a TMDB user.
+export interface Review {
+  id: string
+  author: string
+  rating: number | null // the reviewer's own 0–10 score, when they gave one
+  avatarPath: string | null
+  content: string
+  createdAt: string | null
+  url: string | null
 }
 
 // A single streaming/rent/buy provider for a title in one region (from TMDB's
@@ -100,4 +121,12 @@ export interface TitleDetail {
   watchProviders: Record<string, RegionProviders>
   // movie only: the franchise this belongs to, if any (id/name for a lookup).
   collection: { id: number; name: string; posterPath: string | null } | null
+  // --- "After the credits" feed material ---
+  tagline: string | null
+  budget: number | null // movie only, USD; null when TMDB has 0/unknown
+  revenue: number | null // movie only, USD; null when TMDB has 0/unknown
+  videos: Video[] // YouTube extras, post-watch-interest order (bloopers first)
+  backdrops: string[] // extra backdrop/still paths for the gallery strip
+  reviews: Review[] // TMDB user reviews (first page)
+  keywords: string[] // theme keywords, e.g. "time travel", "heist"
 }
