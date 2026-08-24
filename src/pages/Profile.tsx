@@ -14,6 +14,7 @@ import {
 } from '../lib/tracking'
 import { Poster } from '../components/Poster'
 import { Logo } from '../components/Logo'
+import { ListsSection } from '../components/ListsSection'
 import { usePersistedState, useScrollMemory } from '../lib/uiState'
 
 export function Profile() {
@@ -70,6 +71,8 @@ export function Profile() {
         </Link>
 
         <LibrarySection />
+
+        <ListsSection />
 
         <Link
           to="/history"

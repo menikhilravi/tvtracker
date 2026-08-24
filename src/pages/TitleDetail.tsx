@@ -11,6 +11,7 @@ import {
   IMG,
 } from '../lib/tmdb'
 import type { Episode, MediaType, TitleDetail as TitleDetailType } from '../lib/types'
+import { AddToLists } from '../components/AddToLists'
 import { AfterCredits } from '../components/AfterCredits'
 import { Poster } from '../components/Poster'
 import { PosterRail } from '../components/PosterRail'
@@ -141,6 +142,8 @@ export function TitleDetail() {
         )}
 
         <TrackingBar title={title} />
+
+        <AddToLists title={title} />
 
         <RatingSection title={title} />
 

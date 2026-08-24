@@ -11,6 +11,7 @@ import { Calendar } from './pages/Calendar'
 import { History } from './pages/History'
 import { Tonight } from './pages/Tonight'
 import { Review } from './pages/Review'
+import { ListDetail } from './pages/ListDetail'
 
 const router = createBrowserRouter([
   {
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
       { path: '/history', element: <History /> },
       { path: '/tonight', element: <Tonight /> },
       { path: '/review', element: <Review /> },
+      { path: '/list/:id', element: <ListDetail /> },
       { path: '/profile', element: <Profile /> },
       { path: '/settings', element: <Settings /> },
       { path: '/stats', element: <Stats /> },

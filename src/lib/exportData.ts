@@ -41,6 +41,8 @@ export interface ExportBundle {
   ratings: unknown[]
   episodeRatings: unknown[]
   characterVotes: unknown[]
+  lists: unknown[]
+  listItems: unknown[]
 }
 
 // `id` is the identity primary key on every user-owned table, and paginating by
@@ -94,6 +96,12 @@ async function fetchReferencedTitles(refs: Set<string>): Promise<ExportedTitle[]
   return out
 }
 
+// Lists arrive with migration 0009. A backup must not fail on an install that
+// hasn't run it, so a missing table degrades to an empty section.
+function pageOptional<T>(table: string, columns: string): Promise<T[]> {
+  return page<T>(table, columns).catch(() => [])
+}
+
 export async function buildExport(user: { id: string; email?: string }): Promise<ExportBundle> {
   if (!supabase) throw new Error('Not configured')
 
@@ -122,6 +130,14 @@ export async function buildExport(user: { id: string; email?: string }): Promise
       ),
     ])
 
+  const [lists, listItems] = await Promise.all([
+    pageOptional('lists', 'id, name, emoji, created_at, updated_at'),
+    pageOptional<{ tmdb_id: number; media_type: MediaType }>(
+      'list_items',
+      'list_id, tmdb_id, media_type, name, poster_path, added_at',
+    ),
+  ])
+
   const refs = new Set<string>()
   for (const r of follows) refs.add(`${r.media_type}:${r.tmdb_id}`)
   for (const r of ratings) refs.add(`${r.media_type}:${r.tmdb_id}`)
@@ -129,6 +145,7 @@ export async function buildExport(user: { id: string; email?: string }): Promise
   for (const r of episodeWatches) refs.add(`tv:${r.tmdb_show_id}`)
   for (const r of episodeRatings) refs.add(`tv:${r.tmdb_show_id}`)
   for (const r of movieWatches) refs.add(`movie:${r.tmdb_movie_id}`)
+  for (const r of listItems) refs.add(`${r.media_type}:${r.tmdb_id}`)
 
   const titles = await fetchReferencedTitles(refs)
 
@@ -146,6 +163,8 @@ export async function buildExport(user: { id: string; email?: string }): Promise
       ratings: ratings.length,
       episodeRatings: episodeRatings.length,
       characterVotes: characterVotes.length,
+      lists: lists.length,
+      listItems: listItems.length,
     },
     titles,
     follows,
@@ -154,6 +173,8 @@ export async function buildExport(user: { id: string; email?: string }): Promise
     ratings,
     episodeRatings,
     characterVotes,
+    lists,
+    listItems,
   }
 }
 
