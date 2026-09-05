@@ -289,7 +289,9 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     posterPath: data.poster_path ?? null,
     backdropPath: data.backdrop_path ?? null,
     year: year(data.release_date ?? data.first_air_date),
-    releaseDate: data.release_date ?? null,
+    // TMDB sends '' — not null — for a movie with no announced date; keeping
+    // the empty string made undated films read as already released.
+    releaseDate: data.release_date?.trim() || null,
     genres: (data.genres ?? []).map((g) => g.name),
     genreIds: (data.genres ?? []).map((g) => g.id),
     originalLanguage: data.original_language ?? null,
@@ -307,8 +309,8 @@ export async function getTitle(mediaType: MediaType, id: number): Promise<TitleD
     })),
     lastEpisodeToAir: episodeRef(data.last_episode_to_air),
     nextEpisodeToAir: episodeRef(data.next_episode_to_air),
-    // TMDB's production status ('Ended' / 'Canceled' / 'Returning Series' / …).
-    showStatus: data.status ?? null,
+    // TMDB's production status ('Released' / 'Post Production' / 'Ended' / …).
+    productionStatus: data.status ?? null,
     ended: mediaType === 'tv' && (data.status === 'Ended' || data.status === 'Canceled'),
     watchProviders: normalizeProviders(data['watch/providers']?.results),
     collection: data.belongs_to_collection

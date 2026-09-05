@@ -21,6 +21,7 @@ import { getTitle } from '../lib/tmdb'
 import type { TitleDetail } from '../lib/types'
 import { usePersistedState } from '../lib/uiState'
 import { HEATMAP_WEEKS, computeStreaks, heatmapCells } from '../lib/activity'
+import { todayISO } from '../lib/release'
 
 // Stats + activity, split out of Profile onto their own page.
 export function Stats() {
@@ -231,8 +232,6 @@ function formatWatchTime(minutes: number): { value: string; unit: string } {
 
 const topN = (tally: Map<string, number>, n: number): [string, number][] =>
   [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)
-
-const todayISO = () => new Date().toISOString().slice(0, 10)
 
 function TvStats() {
   const follows = useFollows()

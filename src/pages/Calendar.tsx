@@ -4,6 +4,7 @@ import { getTitle } from '../lib/tmdb'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Poster } from '../components/Poster'
+import { isUnreleasedMovie, todayISO } from '../lib/release'
 
 interface ShowRow {
   tmdb_id: number
@@ -18,7 +19,7 @@ interface Upcoming {
   tmdbId: number
   name: string | null
   posterPath: string | null
-  date: string
+  date: string | null // null for a film with no announced release date
   subtitle: string
 }
 
@@ -66,7 +67,7 @@ export function Calendar() {
 
   const showById = new Map((shows ?? []).map((s) => [s.tmdb_id, s]))
   const movieById = new Map((movies ?? []).map((m) => [m.tmdb_id, m]))
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
 
   const upcomingTv: Upcoming[] = tvDetails
     .map((d) => d.data)
@@ -85,9 +86,14 @@ export function Calendar() {
       }
     })
 
+  // A followed movie belongs here while it's still ahead of you: TMDB says it
+  // isn't released, or it comes out today. Going by date alone used to drop
+  // every announced-but-undated film off the calendar entirely.
   const upcomingMovies: Upcoming[] = movieDetails
     .map((d) => d.data)
-    .filter((d): d is NonNullable<typeof d> => Boolean(d?.releaseDate))
+    .filter((d): d is NonNullable<typeof d> =>
+      Boolean(d && (isUnreleasedMovie(d, today) || d.releaseDate === today)),
+    )
     .map((d) => {
       const m = movieById.get(d.id)
       return {
@@ -96,23 +102,31 @@ export function Calendar() {
         tmdbId: d.id,
         name: m?.name ?? d.title,
         posterPath: m?.poster_path ?? d.posterPath,
-        date: d.releaseDate!,
-        subtitle: '🎬 Movie release',
+        // An unreleased film whose date has already passed is running on a
+        // stale estimate — no better than having no date at all.
+        date: d.releaseDate && d.releaseDate >= today ? d.releaseDate : null,
+        subtitle:
+          d.productionStatus && d.productionStatus !== 'Released'
+            ? `🎬 ${d.productionStatus}`
+            : '🎬 Movie release',
       }
     })
 
-  const upcoming = [...upcomingTv, ...upcomingMovies]
-    .filter((u) => u.date >= today)
+  const upcoming = [...upcomingTv, ...upcomingMovies].filter((u) => !u.date || u.date >= today)
+  const dated = upcoming
+    .filter((u): u is Upcoming & { date: string } => Boolean(u.date))
     .sort((a, b) => a.date.localeCompare(b.date))
+  const undated = upcoming.filter((u) => !u.date)
 
   const loading = tvDetails.some((d) => d.isLoading) || movieDetails.some((d) => d.isLoading)
 
-  // Group by date.
+  // Group by date, with everything not yet dated collected at the end.
   const groups = new Map<string, Upcoming[]>()
-  for (const u of upcoming) {
+  for (const u of dated) {
     if (!groups.has(u.date)) groups.set(u.date, [])
     groups.get(u.date)!.push(u)
   }
+  if (undated.length > 0) groups.set('tba', undated)
 
   return (
     <div className="px-5 pt-14">
@@ -133,7 +147,9 @@ export function Calendar() {
       <div className="space-y-6">
         {[...groups.entries()].map(([date, items]) => (
           <section key={date}>
-            <h2 className="mb-3 text-sm font-semibold text-brand">{formatDate(date)}</h2>
+            <h2 className="mb-3 text-sm font-semibold text-brand">
+              {date === 'tba' ? 'Date to be announced' : formatDate(date)}
+            </h2>
             <div className="space-y-2">
               {items.map((u) => (
                 <Link

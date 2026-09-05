@@ -16,6 +16,7 @@ import {
   type FollowRow,
 } from '../lib/tracking'
 import { usePersistedState } from '../lib/uiState'
+import { isUnreleasedMovie, todayISO, type ReleaseInfo } from '../lib/release'
 
 type MediaTab = 'tv' | 'movie'
 type SortKey = 'recent' | 'title'
@@ -38,6 +39,18 @@ export function Home() {
   const [view, setView] = usePersistedState<ViewMode>('home:view', 'rail')
 
   const { data: follows } = useFollows()
+
+  // Resolved before the early returns so the release lookup below is a hook
+  // that runs on every render, whatever tab is showing.
+  const movieWatchlist = useMemo(
+    () =>
+      sortRows(
+        (follows ?? []).filter((f) => f.status === 'watchlist' && f.media_type === 'movie'),
+        sort,
+      ),
+    [follows, sort],
+  )
+  const movies = useMovieReleaseSplit(movieWatchlist)
 
   if (loading) {
     return <p className="p-6 text-sm text-muted">Loading…</p>
@@ -68,10 +81,15 @@ export function Home() {
   }
 
   // Watchlist = things you haven't started yet, for the active media tab.
-  const watchlist = sortRows(
-    (follows ?? []).filter((f) => f.status === 'watchlist' && f.media_type === tab),
-    sort,
-  )
+  const watchlist =
+    tab === 'movie'
+      ? movieWatchlist
+      : sortRows(
+          (follows ?? []).filter((f) => f.status === 'watchlist' && f.media_type === 'tv'),
+          sort,
+        )
+  // Never offer up a film that isn't out yet as tonight's pick.
+  const surprisePool = tab === 'movie' ? movies.released : watchlist
 
   return (
     <div className="px-5 pt-14">
@@ -103,7 +121,7 @@ export function Home() {
       </div>
 
       <div className="mb-6 flex gap-2.5">
-        <SurpriseMe items={watchlist} />
+        <SurpriseMe items={surprisePool} />
         <Link
           to="/tonight"
           className="flex-1 rounded-2xl border border-line bg-surface/60 py-3 text-center text-sm font-semibold active:scale-[0.98]"
@@ -116,7 +134,7 @@ export function Home() {
 
       {tab === 'movie' ? (
         <MovieWatchlistSections
-          rows={watchlist}
+          split={movies}
           view={view}
           sort={sort}
           setSort={setSort}
@@ -333,23 +351,25 @@ const formatReleaseDate = (iso: string) =>
     day: 'numeric',
   })
 
-// Movies split into a released Watchlist and a separate Upcoming section, so
-// films you can't watch yet don't clutter the list. Release dates aren't on the
-// follow row, so we fetch each movie's detail (shared cache with the detail
-// pages) and bucket by release date vs. today.
-function MovieWatchlistSections({
-  rows,
-  view,
-  sort,
-  setSort,
-  follows,
-}: {
-  rows: FollowRow[]
-  view: ViewMode
-  sort: SortKey
-  setSort: (s: SortKey) => void
-  follows: FollowRow[] | undefined
-}) {
+// What to print under an upcoming poster. An announced-but-undated film is the
+// common case, so it gets a label of its own rather than being left blank.
+const releaseLabel = (iso: string | null) => (iso ? formatReleaseDate(iso) : 'Date TBA')
+
+// Sorts undated films after every dated one.
+const NO_DATE_SORT_KEY = '9999-12-31'
+
+interface MovieReleaseSplit {
+  released: FollowRow[]
+  upcoming: FollowRow[]
+  releaseById: Map<number, string | null>
+}
+
+// Splits the movie watchlist into what you can watch now and what hasn't come
+// out yet. Release dates aren't on the follow row, so each movie's detail is
+// fetched (shared cache with the detail pages) and bucketed on release date
+// *and* production status — a film TMDB lists as "Planned" or "In Production"
+// belongs in Upcoming even when it has no date, or a stale one in the past.
+function useMovieReleaseSplit(rows: FollowRow[]): MovieReleaseSplit {
   const details = useQueries({
     queries: rows.map((r) => ({
       queryKey: ['title', 'movie', r.tmdb_id],
@@ -358,20 +378,47 @@ function MovieWatchlistSections({
       retryDelay: (n: number) => Math.min(1000 * 2 ** n, 8000),
     })),
   })
-  const dateById = new Map<number, string | null>()
-  for (const d of details) if (d.data) dateById.set(d.data.id, d.data.releaseDate)
+  const infoById = new Map<number, ReleaseInfo>()
+  for (const d of details) if (d.data) infoById.set(d.data.id, d.data)
 
-  const today = new Date().toISOString().slice(0, 10)
-  // Unknown/undated dates stay in the Watchlist — only a future date moves a
-  // movie to Upcoming, so nothing is hidden while details are still loading.
+  const today = todayISO()
+  // A movie whose detail hasn't arrived yet stays in the Watchlist, so nothing
+  // is hidden while a fetch is still in flight.
   const isUpcoming = (r: FollowRow) => {
-    const d = dateById.get(r.tmdb_id)
-    return Boolean(d && d > today)
+    const info = infoById.get(r.tmdb_id)
+    return info ? isUnreleasedMovie(info, today) : false
   }
-  const released = rows.filter((r) => !isUpcoming(r))
+  const dateOf = (r: FollowRow) => infoById.get(r.tmdb_id)?.releaseDate ?? null
+
   const upcoming = rows
     .filter(isUpcoming)
-    .sort((a, b) => (dateById.get(a.tmdb_id) ?? '').localeCompare(dateById.get(b.tmdb_id) ?? ''))
+    .sort((a, b) => (dateOf(a) ?? NO_DATE_SORT_KEY).localeCompare(dateOf(b) ?? NO_DATE_SORT_KEY))
+
+  return {
+    released: rows.filter((r) => !isUpcoming(r)),
+    upcoming,
+    // Every upcoming row gets an entry, null date included, so the views can
+    // tell "no date announced" apart from "not an upcoming movie".
+    releaseById: new Map(upcoming.map((r) => [r.tmdb_id, dateOf(r)])),
+  }
+}
+
+// Movies split into a released Watchlist and a separate Upcoming section, so
+// films you can't watch yet don't clutter the list.
+function MovieWatchlistSections({
+  split,
+  view,
+  sort,
+  setSort,
+  follows,
+}: {
+  split: MovieReleaseSplit
+  view: ViewMode
+  sort: SortKey
+  setSort: (s: SortKey) => void
+  follows: FollowRow[] | undefined
+}) {
+  const { released, upcoming, releaseById } = split
 
   return (
     <>
@@ -389,7 +436,7 @@ function MovieWatchlistSections({
       {upcoming.length > 0 && (
         <section className="mb-7">
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted">🎬 Upcoming movies</h2>
-          <FollowView items={upcoming} view={view} dateById={dateById} />
+          <FollowView items={upcoming} view={view} releaseById={releaseById} />
         </section>
       )}
     </>
@@ -399,11 +446,12 @@ function MovieWatchlistSections({
 function FollowView({
   items,
   view,
-  dateById,
+  releaseById,
 }: {
   items: FollowRow[]
   view: ViewMode
-  dateById?: Map<number, string | null>
+  // Present only for the upcoming section; a null value means "no date yet".
+  releaseById?: Map<number, string | null>
 }) {
   if (view === 'list') {
     return (
@@ -423,9 +471,9 @@ function FollowView({
             />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{r.name}</p>
-              {dateById?.get(r.tmdb_id) && (
+              {releaseById?.has(r.tmdb_id) && (
                 <p className="truncate text-[11px] text-faint">
-                  {formatReleaseDate(dateById.get(r.tmdb_id)!)}
+                  {releaseLabel(releaseById.get(r.tmdb_id)!)}
                 </p>
               )}
             </div>
@@ -458,8 +506,8 @@ function FollowView({
             className={`aspect-[2/3] ${posterWidth} shadow-lg shadow-black/40`}
           />
           <p className="mt-1.5 truncate text-xs font-medium text-ink/90">{r.name}</p>
-          {dateById?.get(r.tmdb_id) && (
-            <p className="truncate text-[10px] text-faint">{formatReleaseDate(dateById.get(r.tmdb_id)!)}</p>
+          {releaseById?.has(r.tmdb_id) && (
+            <p className="truncate text-[10px] text-faint">{releaseLabel(releaseById.get(r.tmdb_id)!)}</p>
           )}
         </Link>
       ))}
