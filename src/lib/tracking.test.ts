@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  compareByYear,
   computeNextUp,
   airedProgress,
   watchedMovieIds,
@@ -295,5 +296,61 @@ describe('hasDetail', () => {
 
   it('accepts a detail with genres', () => {
     expect(hasDetail({ ...stub, genres: ['Drama'] })).toBe(true)
+  })
+})
+
+describe('compareByYear', () => {
+  type Row = { name: string | null; year: number | null }
+  const rows: Row[] = [
+    { name: 'Dune', year: 2021 },
+    { name: 'Alien', year: 1979 },
+    { name: 'Arrival', year: 2016 },
+    { name: 'Untitled Sequel', year: null },
+    { name: 'Blade Runner 2049', year: 2017 },
+  ]
+  const sorted = (direction: 'asc' | 'desc') =>
+    [...rows].sort((a, b) => compareByYear(a, b, (r) => r.year, direction)).map((r) => r.name)
+
+  it('sorts newest first', () => {
+    expect(sorted('desc')).toEqual([
+      'Dune',
+      'Blade Runner 2049',
+      'Arrival',
+      'Alien',
+      'Untitled Sequel',
+    ])
+  })
+
+  it('sorts oldest first', () => {
+    expect(sorted('asc')).toEqual([
+      'Alien',
+      'Arrival',
+      'Blade Runner 2049',
+      'Dune',
+      'Untitled Sequel',
+    ])
+  })
+
+  it('keeps titles with no known year last in both directions', () => {
+    expect(sorted('asc').at(-1)).toBe('Untitled Sequel')
+    expect(sorted('desc').at(-1)).toBe('Untitled Sequel')
+  })
+
+  it('breaks ties within a year alphabetically', () => {
+    const sameYear: Row[] = [
+      { name: 'Zodiac', year: 2007 },
+      { name: 'Atonement', year: 2007 },
+    ]
+    const byYear = [...sameYear].sort((a, b) => compareByYear(a, b, (r) => r.year, 'desc'))
+    expect(byYear.map((r) => r.name)).toEqual(['Atonement', 'Zodiac'])
+  })
+
+  it('orders two unknown years alphabetically rather than arbitrarily', () => {
+    const unknown: Row[] = [
+      { name: 'Sequel B', year: null },
+      { name: 'Sequel A', year: null },
+    ]
+    const byYear = [...unknown].sort((a, b) => compareByYear(a, b, (r) => r.year, 'desc'))
+    expect(byYear.map((r) => r.name)).toEqual(['Sequel A', 'Sequel B'])
   })
 })

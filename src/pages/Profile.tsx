@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
 import {
+  compareByYear,
   useAllRatings,
   useCachedTitles,
   useLibrary,
   useRemoveFollow,
+  useTitleYears,
   ratingKey,
   titleKey,
   type LibraryCategory,
@@ -152,7 +154,7 @@ export function Profile() {
 // --- Library ----------------------------------------------------------------
 
 type Filter = 'all' | LibraryCategory
-type SortKey = 'recent' | 'title' | 'rating'
+type SortKey = 'recent' | 'title' | 'rating' | 'year-desc' | 'year-asc'
 type MediaKind = 'tv' | 'movie'
 
 const CATEGORY_ORDER: LibraryCategory[] = [
@@ -175,6 +177,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'recent', label: 'Recently updated' },
   { key: 'title', label: 'Title (A–Z)' },
   { key: 'rating', label: 'Your rating' },
+  { key: 'year-desc', label: 'Year (newest first)' },
+  { key: 'year-asc', label: 'Year (oldest first)' },
 ]
 
 function countsFor(items: LibraryItem[]): Record<LibraryCategory, number> {
@@ -301,9 +305,11 @@ function LibraryModal({
   const [genre, setGenre] = usePersistedState<string>(`lib:${storageKey}:genre`, '')
   const scoreOf = (it: LibraryItem) => ratings?.get(ratingKey(it.media_type, it.tmdb_id))
 
-  // Genres come from the cached `titles` rows, so filtering the library by genre
-  // is one read rather than a TMDB fetch per title.
+  // Genres and years come from the cached `titles` rows, so filtering and
+  // sorting the library is one read rather than a TMDB fetch per title.
   const { data: meta } = useCachedTitles()
+  const { data: years } = useTitleYears()
+  const yearOf = (it: LibraryItem) => years?.get(titleKey(it.media_type, it.tmdb_id)) ?? null
   const genresOf = (it: LibraryItem) =>
     meta?.get(titleKey(it.media_type, it.tmdb_id))?.genres ?? []
   const availableGenres = useMemo(() => {
@@ -349,6 +355,10 @@ function LibraryModal({
     const list = base.filter((it) => active === 'all' || it.category === active)
     const byName = (a: LibraryItem, b: LibraryItem) => (a.name ?? '').localeCompare(b.name ?? '')
     if (sort === 'title') return [...list].sort(byName)
+    if (sort === 'year-desc' || sort === 'year-asc') {
+      const direction = sort === 'year-asc' ? 'asc' : 'desc'
+      return [...list].sort((a, b) => compareByYear(a, b, yearOf, direction))
+    }
     if (sort === 'rating') {
       // Highest score first; unrated fall to the bottom, then A–Z within a tie.
       return [...list].sort(
@@ -357,7 +367,7 @@ function LibraryModal({
     }
     return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, active, sort, ratings])
+  }, [base, active, sort, ratings, years])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">

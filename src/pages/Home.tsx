@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
@@ -9,9 +9,12 @@ import { PosterRail } from '../components/PosterRail'
 import { ViewToggle, type ViewMode } from '../components/ViewToggle'
 import { getSimilarTitles, getTitle } from '../lib/tmdb'
 import {
+  compareByYear,
   useAllRatings,
   useFollows,
+  useTitleYears,
   ratingKey,
+  titleKey,
   trackedKey,
   type FollowRow,
 } from '../lib/tracking'
@@ -19,16 +22,24 @@ import { usePersistedState } from '../lib/uiState'
 import { isUnreleasedMovie, todayISO, type ReleaseInfo } from '../lib/release'
 
 type MediaTab = 'tv' | 'movie'
-type SortKey = 'recent' | 'title'
+type SortKey = 'recent' | 'title' | 'year-desc' | 'year-asc'
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'recent', label: 'Recently added' },
   { key: 'title', label: 'Title (A–Z)' },
+  { key: 'year-desc', label: 'Year (newest first)' },
+  { key: 'year-asc', label: 'Year (oldest first)' },
 ]
 
-function sortRows(rows: FollowRow[], sort: SortKey) {
+// `yearOf` comes from the cached `titles` rows, so sorting by year costs no
+// extra TMDB fetches. It returns null for anything we haven't cached yet.
+function sortRows(rows: FollowRow[], sort: SortKey, yearOf: (r: FollowRow) => number | null) {
   const items = [...rows]
   if (sort === 'title') return items.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+  if (sort === 'year-desc' || sort === 'year-asc') {
+    const direction = sort === 'year-asc' ? 'asc' : 'desc'
+    return items.sort((a, b) => compareByYear(a, b, yearOf, direction))
+  }
   return items.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 
@@ -39,6 +50,11 @@ export function Home() {
   const [view, setView] = usePersistedState<ViewMode>('home:view', 'rail')
 
   const { data: follows } = useFollows()
+  const { data: years } = useTitleYears()
+  const yearOf = useCallback(
+    (r: FollowRow) => years?.get(titleKey(r.media_type, r.tmdb_id)) ?? null,
+    [years],
+  )
 
   // Resolved before the early returns so the release lookup below is a hook
   // that runs on every render, whatever tab is showing.
@@ -47,8 +63,9 @@ export function Home() {
       sortRows(
         (follows ?? []).filter((f) => f.status === 'watchlist' && f.media_type === 'movie'),
         sort,
+        yearOf,
       ),
-    [follows, sort],
+    [follows, sort, yearOf],
   )
   const movies = useMovieReleaseSplit(movieWatchlist)
 
@@ -87,6 +104,7 @@ export function Home() {
       : sortRows(
           (follows ?? []).filter((f) => f.status === 'watchlist' && f.media_type === 'tv'),
           sort,
+          yearOf,
         )
   // Never offer up a film that isn't out yet as tonight's pick.
   const surprisePool = tab === 'movie' ? movies.released : watchlist

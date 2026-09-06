@@ -158,7 +158,7 @@ export function useFollow(title: CacheableTitle) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['follow', tmdbId, mediaType] })
       qc.invalidateQueries({ queryKey: ['follows'] })
-      qc.invalidateQueries({ queryKey: ['titles', 'cached'] })
+      qc.invalidateQueries({ queryKey: ['titles'] })
     },
   })
 
@@ -691,6 +691,22 @@ export interface CachedTitle {
 
 export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`
 
+// Sorting a library list by release year. Titles with no cached year sort last
+// whichever direction you pick — an unknown year is not "year zero" — and ties
+// fall back to A–Z so the order is stable within a year.
+export function compareByYear<T extends { name: string | null }>(
+  a: T,
+  b: T,
+  yearOf: (row: T) => number | null,
+  direction: 'asc' | 'desc',
+): number {
+  const ya = yearOf(a)
+  const yb = yearOf(b)
+  const byName = (a.name ?? '').localeCompare(b.name ?? '')
+  if (ya === null || yb === null) return ya === yb ? byName : ya === null ? 1 : -1
+  return (direction === 'asc' ? ya - yb : yb - ya) || byName
+}
+
 // Fallbacks for a title whose detail hasn't been synced yet — the flat averages
 // the headline stat used to apply to everything.
 export const FALLBACK_EPISODE_MINUTES = 40
@@ -716,6 +732,30 @@ export function useCachedTitles() {
           .range(from, to),
       )
       return new Map(rows.map((r) => [titleKey(r.media_type, r.tmdb_id), r]))
+    },
+  })
+}
+
+// Release year for every cached title, keyed by `titleKey`. Deliberately not
+// folded into useCachedTitles: that one only returns rows with a full detail
+// sync, while the year is already on a list-shaped stub — so an imported
+// library can sort by year without first syncing detail for thousands of rows.
+export function useTitleYears() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['titles', 'years'],
+    enabled: Boolean(supabase && session),
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ tmdb_id: number; media_type: MediaType; release_year: number }>(
+        (from, to) =>
+          supabase!
+            .from('titles')
+            .select('tmdb_id, media_type, release_year')
+            .not('release_year', 'is', null)
+            .order('id', { ascending: true })
+            .range(from, to),
+      )
+      return new Map(rows.map((r) => [titleKey(r.media_type, r.tmdb_id), r.release_year]))
     },
   })
 }
@@ -783,7 +823,7 @@ export function useSyncTitleDetails() {
       return { done, failed }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['titles', 'cached'] })
+      qc.invalidateQueries({ queryKey: ['titles'] })
     },
   })
 }
